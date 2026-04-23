@@ -128,7 +128,7 @@ func (b *Broker) LidarComMensagem(conn net.Conn) {
 	if err != nil {
 		return
 	}
-	fmt.Printf("[BROKER %d] Recebeu %s do Broker %d\n", b.ID, msg.Payload, msg.IDOrigem)
+	fmt.Printf("[BROKER %d] Recebeu OK %s do Broker %d\n", b.ID, msg.Payload, msg.IDOrigem)
 
 	switch msg.Tipo {
 	case protocol.TipoEleicao:
