@@ -1,0 +1,7 @@
+//Vai guardar os IPs dos servidores
+{
+  "1": "localhost:8081",
+  "2": "localhost:8082",
+  "3": "localhost:8083",
+  "4": "localhost:8084"
+}
