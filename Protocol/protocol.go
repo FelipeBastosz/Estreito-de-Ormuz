@@ -7,6 +7,7 @@ import "time"
 const (
 	TipoEleicao      = "ELEICAO"       // Início do Algoritmo do Valentão
 	TipoVitoria      = "COORDINATOR"   // Fim do Algoritmo do Valentão
+	TipoOkEleicao    = "OK"            //Resposta de que servidor x é maior do que o outro que solicitou a eleição
 	TipoOcorrencia   = "NOVA_TAREFA"   // Um sensor detectou algo
 	TipoStatusDrone  = "STATUS_DRONE"  // Um drone avisando "cheguei no destino"
 	TipoSyncEstado   = "SYNC_GLOBAL"   // O Coordenador mandando o backup para os outros
