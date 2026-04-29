@@ -43,10 +43,11 @@ type Ocorrencia struct {
 
 // Drone e Sensor são representações físicas (Digital Twins) dos seus atuadores.
 type Drone struct {
-	ID      string `json:"id"`
-	Posicao string `json:"posicao"`
-	Status  string `json:"status"`
-	Bateria int    `json:"bateria"`
+	ID       string `json:"id"`
+	Posicao  string `json:"posicao"` // Endereço TCP onde o drone escuta comandos
+	Status   string `json:"status"`  // "disponivel", "em_missao", "recarregando"
+	Bateria  int    `json:"bateria"`
+	MissaoID string `json:"missao_id"` // ID da ocorrência em atendimento (vazio se livre)
 }
 
 type Sensor struct {
