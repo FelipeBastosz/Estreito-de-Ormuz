@@ -55,3 +55,10 @@ type Sensor struct {
 	Setor string `json:"setor"`
 	Tipo  string `json:"tipo"`
 }
+
+// ComandoMissao é o payload enviado dentro de TipoComandoDrone.
+type ComandoMissao struct {
+	OcorrenciaID string `json:"ocorrencia_id"`
+	Descricao    string `json:"descricao"`
+	Prioridade   int    `json:"prioridade"`
+}
