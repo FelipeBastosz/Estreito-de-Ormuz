@@ -5,13 +5,15 @@ import "time"
 // Constantes: Usamos constantes para evitar o clássico erro de digitar "ELEICAO"
 // em um arquivo e "ELEICÃO" em outro, o que faria o sistema falhar silenciosamente.
 const (
-	TipoEleicao      = "ELEICAO"       // Início do Algoritmo do Valentão
-	TipoVitoria      = "COORDINATOR"   // Fim do Algoritmo do Valentão
-	TipoOkEleicao    = "OK"            //Resposta de que servidor x é maior do que o outro que solicitou a eleição
-	TipoOcorrencia   = "NOVA_TAREFA"   // Um sensor detectou algo
-	TipoStatusDrone  = "STATUS_DRONE"  // Um drone avisando "cheguei no destino"
-	TipoSyncEstado   = "SYNC_GLOBAL"   // O Coordenador mandando o backup para os outros
-	TipoComandoDrone = "COMANDO_DRONE" // O Coordenador mandando o drone se mexer
+	TipoEleicao       = "ELEICAO"        // Início do Algoritmo do Valentão
+	TipoVitoria       = "COORDINATOR"    // Fim do Algoritmo do Valentão
+	TipoOkEleicao     = "OK"             // Resposta de que o remetente é maior
+	TipoOcorrencia    = "NOVA_TAREFA"    // Um sensor detectou algo
+	TipoStatusDrone   = "STATUS_DRONE"   // Um drone reportando conclusão de missão
+	TipoSyncEstado    = "SYNC_GLOBAL"    // Coordenador enviando backup de estado
+	TipoComandoDrone  = "COMANDO_DRONE"  // Coordenador ordenando drone a se mover
+	TipoRegistroDrone = "REGISTRO_DRONE" // Drone se apresentando ao sistema
+	TipoACK           = "ACK"            //Resposta do coordenador ao broker que solicitou o serviço
 )
 
 // Mensagem: É o "Envelope" universal do nosso sistema.
