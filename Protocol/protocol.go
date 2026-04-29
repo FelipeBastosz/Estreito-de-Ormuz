@@ -2,8 +2,8 @@ package protocol
 
 import "time"
 
-// Constantes: Usamos constantes para evitar o clássico erro de digitar "ELEICAO"
-// em um arquivo e "ELEICÃO" em outro, o que faria o sistema falhar silenciosamente.
+// Constantes de tipo de mensagem.
+// Usar constantes evita bugs silenciosos por erro de digitação.
 const (
 	TipoEleicao       = "ELEICAO"        // Início do Algoritmo do Valentão
 	TipoVitoria       = "COORDINATOR"    // Fim do Algoritmo do Valentão
@@ -16,32 +16,25 @@ const (
 	TipoACK           = "ACK"            //Resposta do coordenador ao broker que solicitou o serviço
 )
 
-// Mensagem: É o "Envelope" universal do nosso sistema.
-// TUDO que viaja no Socket TCP tem que ter esse formato exato.
+// Mensagem é o "envelope" universal do sistema.
+// TUDO que trafega no TCP tem este formato.
 type Mensagem struct {
-	// A tag `json:"tipo"` ensina o Go a transformar a variável "Tipo" na chave "tipo" no JSON.
-	Tipo string `json:"tipo"`
-
-	// IDOrigem é o remetente. Vital para o Valentão saber se quem mandou a mensagem é "maior" ou "menor".
-	IDOrigem int `json:"id_origem"`
-
-	// Timestamp carimba a hora que o envelope foi fechado. Ajuda a ordenar os eventos.
+	Tipo      string    `json:"tipo"`
+	IDOrigem  int       `json:"id_origem"` // ID do broker remetente (0 para sensores/drones)
 	Timestamp time.Time `json:"timestamp"`
-
-	// Payload é o recheio. O Go vai transformar a struct Ocorrencia ou Drone em uma
-	// string (texto puro) e colocar aqui dentro.
-	Payload string `json:"payload"`
+	Payload   string    `json:"payload"` // JSON de Ocorrencia, Drone, etc.
 }
 
-// Ocorrencia: Representa a emergência real enviada pelo sensor.
+// Ocorrencia representa uma emergência detectada por um sensor.
 type Ocorrencia struct {
 	ID         string    `json:"id"`
-	Prioridade int       `json:"prioridade"` // Ex: 3 (Crítico), 2 (Alerta), 1 (Aviso)
-	Timestamp  time.Time `json:"timestamp"`  // Quando o evento físico aconteceu
+	Prioridade int       `json:"prioridade"` // 3=Crítico, 2=Alerta, 1=Aviso
+	Timestamp  time.Time `json:"timestamp"`
 	Descricao  string    `json:"descricao"`
+	Setor      string    `json:"setor"` // Setor de origem da ocorrência
 }
 
-// Drone e Sensor são representações físicas (Digital Twins) dos seus atuadores.
+// Drone é a representação digital (Digital Twin) de um drone físico.
 type Drone struct {
 	ID       string `json:"id"`
 	Posicao  string `json:"posicao"` // Endereço TCP onde o drone escuta comandos
@@ -50,6 +43,7 @@ type Drone struct {
 	MissaoID string `json:"missao_id"` // ID da ocorrência em atendimento (vazio se livre)
 }
 
+// Sensor representa um sensor físico de um setor.
 type Sensor struct {
 	ID    string `json:"id"`
 	Setor string `json:"setor"`
