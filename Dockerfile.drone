@@ -1,0 +1,18 @@
+# ── Etapa 1: Compilação ──────────────────────────────────────
+FROM golang:1.26-alpine AS builder
+
+WORKDIR /src
+COPY go.mod ./
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/drone ./Drone/
+
+# ── Etapa 2: Imagem final ─────────────────────────────────────
+FROM alpine:3.19
+
+WORKDIR /app
+COPY --from=builder /out/drone .
+
+# Argumentos: [ID_DRONE] [ENDERECO_PROPRIO] [ENDERECO_BROKER]
+# Exemplo:    drone1 0.0.0.0:9091 broker1:9081
+ENTRYPOINT ["/app/drone"]

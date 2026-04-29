@@ -1,0 +1,30 @@
+# ── Etapa 1: Compilação ──────────────────────────────────────
+FROM golang:1.26-alpine AS builder
+
+WORKDIR /src
+
+# Copia go.mod
+COPY go.mod ./
+
+# Copia o restante do código
+COPY . .
+
+# Compila apenas o binário do broker
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/broker ./Broker/
+
+# ── Etapa 2: Imagem final (mínima) ───────────────────────────
+FROM alpine:3.19
+
+WORKDIR /app
+
+# Copia binário compilado e configuração Docker
+COPY --from=builder /out/broker .
+COPY config.docker.json .
+
+# Diretório de persistência de estado
+RUN mkdir -p /app/state
+
+EXPOSE 9081 9082 9083 9084
+
+# O ID do broker é passado como argumento (ex: CMD ["1"])
+ENTRYPOINT ["/app/broker"]

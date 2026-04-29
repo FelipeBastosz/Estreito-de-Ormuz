@@ -1,0 +1,18 @@
+# ── Etapa 1: Compilação ──────────────────────────────────────
+FROM golang:1.26-alpine AS builder
+
+WORKDIR /src
+COPY go.mod ./
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/sensor ./Sensor/
+
+# ── Etapa 2: Imagem final ─────────────────────────────────────
+FROM alpine:3.19
+
+WORKDIR /app
+COPY --from=builder /out/sensor .
+
+# Argumentos: [ID_SENSOR] [ID_SETOR] [ENDERECO_BROKER]
+# Exemplo:    sensor S1A setor-1 broker1:9081
+ENTRYPOINT ["/app/sensor"]
