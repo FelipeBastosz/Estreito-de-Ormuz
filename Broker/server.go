@@ -476,9 +476,25 @@ func (b *Broker) enviarComandoAoDrone(enderecoDrone string, droneID string, ocor
 		Payload:   string(payload),
 	}
 
-	if !b.enviarMensagem(enderecoDrone, msg) {
-		// Drone inacessível: recoloca a ocorrência na fila e libera o drone
-		fmt.Printf("[Broker %d] Drone %s inacessível! Recolocando ocorrência %s na fila.\n",
+	sucesso := false
+	conn, err := net.DialTimeout("tcp", enderecoDrone, 3*time.Second)
+	if err == nil {
+		defer conn.Close()
+		if err := json.NewEncoder(conn).Encode(msg); err != nil {
+			// 3. AGUARDA O ACK: O diferencial está aqui.
+			// O Broker agora espera o Drone dizer "Ok, aceitei e vou voar".
+			conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+			var resposta protocol.Mensagem
+			if err := json.NewDecoder(conn).Decode(&resposta); err == nil {
+				if resposta.Tipo == protocol.TipoACK {
+					sucesso = true // O Drone confirmou o recebimento e a disponibilidade!
+				}
+			}
+		}
+	}
+
+	if !sucesso {
+		fmt.Printf("[Broker %d] Drone %s REJEITOU ou está OFFLINE! Devolvendo ocorrência %s para a fila.\n",
 			b.ID, droneID, ocorrencia.ID)
 
 		b.mu.Lock()
