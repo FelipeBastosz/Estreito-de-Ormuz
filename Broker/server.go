@@ -41,8 +41,32 @@ func (b *Broker) encerrarSistema() {
 		<-sc // Fica bloqueado aqui até receber o sinal
 		fmt.Printf("\n[Broker %d] [SISTEMA] Iniciando desligamento ordenado (Graceful Shutdown)...\n", b.ID)
 
-		// Se eu for o coordenador, poderia avisar os outros ou salvar algo crítico aqui.
-		// Para manter simples, apenas garantimos que as conexões em andamento terminem.
+		b.mu.Lock()
+		isCoordenador := (b.ID == b.Coordenador)
+		b.mu.Unlock()
+
+		if isCoordenador {
+			fmt.Println("[BROKER %d] Sou o Coordenador. Vou passar o controle para o sucessor")
+
+			sucessorID := -1
+
+			for id := range b.OutrosBrokers {
+				if id > sucessorID {
+					sucessorID = id
+				}
+			}
+
+			if sucessorID != -1 {
+				msgHandoff := protocol.Mensagem{
+					Tipo:     protocol.TipoHandoff,
+					IDOrigem: b.ID,
+				}
+				b.enviarMensagem(b.OutrosBrokers[sucessorID], msgHandoff)
+				fmt.Printf("[SISTEMA] Comando de liderança enviado para o Broker %d\n", sucessorID)
+			}
+		}
+
+		//Pausa para garantir o envio da mensagem
 		time.Sleep(1 * time.Second)
 
 		fmt.Printf("[Broker %d] [SISTEMA] Servidor encerrado com sucesso. Boa noite!\n", b.ID)
