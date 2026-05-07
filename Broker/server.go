@@ -46,7 +46,7 @@ func (b *Broker) encerrarSistema() {
 		b.mu.Unlock()
 
 		if isCoordenador {
-			fmt.Println("[BROKER %d] Sou o Coordenador. Vou passar o controle para o sucessor")
+			fmt.Printf("[BROKER %d] Sou o Coordenador. Vou passar o controle para o sucessor\n", b.ID)
 
 			sucessorID := -1
 
@@ -69,7 +69,7 @@ func (b *Broker) encerrarSistema() {
 		//Pausa para garantir o envio da mensagem
 		time.Sleep(1 * time.Second)
 
-		fmt.Printf("[Broker %d] [SISTEMA] Servidor encerrado com sucesso. Boa noite!\n", b.ID)
+		fmt.Printf("[Broker %d] [SISTEMA] Servidor encerrado com sucesso!\n", b.ID)
 		os.Exit(0)
 	}()
 }
@@ -306,7 +306,7 @@ func (b *Broker) LidarComMensagem(conn net.Conn) {
 		// Se EU sou o novo coordenador, processo minhas próprias pendências
 		if msg.IDOrigem == b.ID {
 			for _, pendente := range pendentes {
-				// Um truque elegante: mando a mensagem pra mim mesmo para ela
+				// mando a mensagem pra mim mesmo para ela
 				// cair no topo do 'LidarComMensagem' como se fosse nova!
 				go b.enviarMensagem(b.Endereco, pendente)
 			}
@@ -522,7 +522,7 @@ func (b *Broker) enviarComandoAoDrone(enderecoDrone string, droneID string, ocor
 	conn, err := net.DialTimeout("tcp", enderecoDrone, 3*time.Second)
 	if err == nil {
 		defer conn.Close()
-		if err := json.NewEncoder(conn).Encode(msg); err != nil {
+		if err := json.NewEncoder(conn).Encode(msg); err == nil {
 			// 3. AGUARDA O ACK: O diferencial está aqui.
 			// O Broker agora espera o Drone dizer "Ok, aceitei e vou voar".
 			conn.SetReadDeadline(time.Now().Add(2 * time.Second))
@@ -535,22 +535,30 @@ func (b *Broker) enviarComandoAoDrone(enderecoDrone string, droneID string, ocor
 		}
 	}
 
+	if sucesso {
+		go b.monitorarMissao(droneID, ocorrencia)
+	}
+
 	if !sucesso {
 		fmt.Printf("[Broker %d] Drone %s REJEITOU ou está OFFLINE! Devolvendo ocorrência %s para a fila.\n",
 			b.ID, droneID, ocorrencia.ID)
 
 		b.mu.Lock()
-		heap.Push(&b.Estado.FilaEspera, ocorrencia) // 1. Devolve a tarefa
+		// 4. Devolve a tarefa para o topo da fila de prioridade
+		heap.Push(&b.Estado.FilaEspera, ocorrencia)
+
 		if drone, ok := b.Estado.Drones[droneID]; ok {
-			drone.Status = "indisponivel" // 2. Marca o drone como defeituoso
+			// Se o erro foi de conexão, marcamos como indisponível.
+			// Se foi apenas recusa, ele logo enviará um novo status de qualquer forma.
+			drone.Status = "indisponivel"
 			drone.MissaoID = ""
 		}
 		b.mu.Unlock()
 
-		// 3. Avisa os outros brokers que a fila cresceu e um drone quebrou
+		// 5. Notifica o cluster sobre a mudança na fila e no status do drone
 		b.sincronizarEstado()
 
-		// 4. Tenta achar outro drone imediatamente para não atrasar a emergência
+		// 6. Tenta outro drone imediatamente (talvez o Drone 1 esteja livre para cobrir o Drone 2)
 		go b.tentarDespacharDrone()
 	}
 }
