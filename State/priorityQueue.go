@@ -26,7 +26,7 @@ func (pq FilaPrioridade) Swap(i, j int) {
 	pq[i], pq[j] = pq[j], pq[i]
 }
 
-// Push é chamado quando uma NOVA ocorrência chega.
+// Push é chamado quando uma nova ocorrência chega.
 // Note o *pq (Ponteiro para a Fila). Precisamos do ponteiro pois o append altera
 // o tamanho original do Array na memória.
 func (pq *FilaPrioridade) Push(x interface{}) {
