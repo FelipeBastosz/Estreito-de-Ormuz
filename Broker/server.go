@@ -317,8 +317,26 @@ func (b *Broker) LidarComMensagem(conn net.Conn) {
 			// Se OUTRO broker ganhou, reenvio as pendências para ele exigindo ACK
 		} else {
 			for _, pendente := range pendentes {
-				fmt.Printf("[Broker %d] Reenviando requisição pendente para o novo líder %d\n", b.ID, msg.IDOrigem)
-				go b.enviarMensagemComAck(b.OutrosBrokers[msg.IDOrigem], pendente)
+				mensagemPendente := pendente
+
+				//Crio uma função paralela para reenviar as mensagens
+				go func(reenviarMsg protocol.Mensagem) {
+					fmt.Print("[Broker %d] Tentando reenviar pendência %s para o coordenador %d\n", b.ID, reenviarMsg.IDOrigem, msg.IDOrigem)
+
+					//Tenta reenviar a mensagem e espera uma resposta do coordenador
+					//Se retornar false, sabemos que deu erro a comunicação com o servidor
+					if !b.enviarMensagemComAck(b.OutrosBrokers[msg.IDOrigem], reenviarMsg) {
+						fmt.Printf("[Broker %d] LÍDER %d FALHOU no reenvio! Devolvendo mensagem ao buffer local.\n", b.ID, msg.IDOrigem)
+
+						//Se o líder morreu durante o reenvio, a mensagem volta para o buffer de mensagens pendentes
+						b.mu.Lock()
+						b.MensagensPendentes = append(b.MensagensPendentes, reenviarMsg)
+						b.mu.Unlock()
+
+						// Avisa que o líder parece estar offline para forçar verificação e iniciar outra eleição
+						go b.verificarCoordenador()
+					}
+				}(mensagemPendente)
 			}
 		}
 
