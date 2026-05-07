@@ -555,6 +555,38 @@ func (b *Broker) enviarComandoAoDrone(enderecoDrone string, droneID string, ocor
 	}
 }
 
+// monitorarMissao atua como um Cão de Guarda (Watchdog).
+// Se o drone não reportar sucesso dentro de 20 segundos, ele é considerado destruído.
+func (b *Broker) monitorarMissao(droneID string, ocorrencia *protocol.Ocorrencia) {
+	// Tolerância ajustada matematicamente para o limite das missões
+	time.Sleep(20 * time.Second)
+
+	b.mu.Lock()
+	drone, existe := b.Estado.Drones[droneID]
+
+	// Se passaram 20s e o drone AINDA está marcado com essa mesma missão, ele caiu!
+	if existe && drone.MissaoID == ocorrencia.ID {
+		fmt.Printf("\n🚨 [ALERTA CRÍTICO] Broker %d perdeu sinal do Drone %s no ar!\n", b.ID, droneID)
+		fmt.Printf("🚨 Removendo drone da frota e reenfileirando a ocorrência %s...\n", ocorrencia.ID)
+
+		// 1. Remove o drone permanentemente da RAM do sistema
+		delete(b.Estado.Drones, droneID)
+
+		// 2. Salva a missão devolvendo-a para o topo da fila
+		heap.Push(&b.Estado.FilaEspera, ocorrencia)
+
+		b.mu.Unlock()
+
+		// 3. Atualiza todo o cluster sobre a perda do equipamento e o aumento da fila
+		b.sincronizarEstado()
+
+		// 4. Manda um novo drone imediatamente para não atrasar a emergência
+		go b.tentarDespacharDrone()
+		return
+	}
+	b.mu.Unlock()
+}
+
 func (b *Broker) IniciarEleicao() {
 	b.mu.Lock()
 	b.Coordenador = -1
