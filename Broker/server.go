@@ -267,6 +267,30 @@ func (b *Broker) LidarComMensagem(conn net.Conn) {
 			fmt.Printf("[Broker %d] Estado sincronizado com o Coordenador %d\n", b.ID, msg.IDOrigem)
 		}
 
+	//Coordenador morre a passa a liderança para o próximo broker com maior ID
+	case protocol.TipoHandoff:
+		fmt.Printf("[Broker %d] O antigo coordenador morreu. Assumindo a liderança\n", b.ID)
+		//Atualiza o ID do coordenador
+		b.mu.Lock()
+		b.Coordenador = b.ID
+		b.mu.Unlock()
+
+		//Cria uma mensagem de vitória para atualizar os outros brokers
+		msgVitoria := protocol.Mensagem{
+			Tipo:      protocol.TipoVitoria,
+			IDOrigem:  b.ID,
+			Timestamp: time.Now(),
+		}
+
+		//Envia a mensagem de vitória para avisar que agora há um novo coordenador
+		for id, endereco := range b.OutrosBrokers {
+			if id < b.ID {
+				go b.enviarMensagem(endereco, msgVitoria)
+			}
+		}
+
+		go b.tentarDespacharDrone()
+
 	// Exibe uma mensagem de vitória se algum coordenador venceu e descarrega as requisições que não foram atendidas pelo coordenador
 	case protocol.TipoVitoria:
 		b.mu.Lock()
