@@ -97,9 +97,22 @@ func (d *Drone) processarComando(conn net.Conn) {
 			d.mu.Unlock()
 			return
 		}
+
+		//Reserva o drone e coloca ele em missão
 		d.Status = "em_missao"
 		d.mu.Unlock()
 
+		ack := protocol.Mensagem{
+			Tipo:      protocol.TipoACK,
+			IDOrigem:  msg.IDOrigem,
+			Timestamp: msg.Timestamp,
+		}
+
+		if err := json.NewEncoder(conn).Encode(ack); err != nil {
+			fmt.Printf("[Drone %s] Erro ao enviar resposta ao Broker: %v\n", d.ID, err)
+		}
+
+		//Processa os dados da missão
 		var comando protocol.ComandoMissao
 		json.Unmarshal([]byte(msg.Payload), &comando)
 
