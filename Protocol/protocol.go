@@ -14,6 +14,7 @@ const (
 	TipoComandoDrone  = "COMANDO_DRONE"  // Coordenador ordenando drone a se mover
 	TipoRegistroDrone = "REGISTRO_DRONE" // Drone se apresentando ao sistema
 	TipoACK           = "ACK"            //Resposta do coordenador ao broker que solicitou o serviço
+	TipoHandoff       = "Handoff"        //Passa a liderança para o servidor com id menor mais próximo
 )
 
 // Mensagem é o "envelope" universal do sistema.
