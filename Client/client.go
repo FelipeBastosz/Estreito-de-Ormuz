@@ -1,0 +1,87 @@
+package main
+
+import (
+	protocol "Desbloqueio-do-Estreito-de-Ormuz/Protocol"
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"net"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+)
+
+func main() {
+	if len(os.Args) < 2 {
+		fmt.Println("Uso: client [ENDERECO_BROKER]")
+		fmt.Println("Exemplo: client 192.168.1.50:9081")
+		return
+	}
+
+	enderecoBroker := os.Args[1]
+	reader := bufio.NewReader(os.Stdin)
+
+	fmt.Println("==================================================")
+	fmt.Println("   Terminal de Comando - Estreito de Ormuz        ")
+	fmt.Println("==================================================")
+	fmt.Printf("Conectado ao Broker: %s\n\n", enderecoBroker)
+
+	contador := 1
+	for {
+		fmt.Print("Digite a descrição da Ocorrência (ou 'sair'): ")
+		descricao, _ := reader.ReadString('\n')
+		descricao = strings.TrimSpace(descricao)
+
+		if strings.ToLower(descricao) == "sair" {
+			break
+		}
+
+		fmt.Print("Insira a prioridade da requisição (1-Aviso, 2-Alerta, 3-Crítico): ")
+		prioStr, _ := reader.ReadString('\n')
+		prioridade, err := strconv.Atoi(strings.TrimSpace(prioStr))
+		if err != nil || prioridade < 1 || prioridade > 3 {
+			fmt.Println("❌ Prioridade inválida. Use 1, 2 ou 3.\n")
+			continue
+		}
+
+		ocorrencia := protocol.Ocorrencia{
+			ID:         fmt.Sprintf("USER-%s-OC%04d", os.Getenv("HOSTNAME"), contador),
+			Prioridade: prioridade,
+			Timestamp:  time.Now(),
+			Descricao:  descricao,
+			Setor:      "manual-input",
+		}
+
+		enviarOcorrencia(enderecoBroker, ocorrencia)
+		contador++
+		fmt.Println()
+	}
+}
+
+func enviarOcorrencia(ipDestino string, ocorrencia protocol.Ocorrencia) {
+	payload, _ := json.Marshal(ocorrencia)
+	msg := protocol.Mensagem{
+		Tipo:      protocol.TipoOcorrencia,
+		IDOrigem:  0,
+		Timestamp: time.Now(),
+		Payload:   string(payload),
+	}
+
+	conn, err := net.DialTimeout("tcp", ipDestino, 2*time.Second)
+	if err != nil {
+		fmt.Printf("❌ Falha na conexão com %s: %v\n", ipDestino, err)
+		return
+	}
+	defer conn.Close()
+
+	json.NewEncoder(conn).Encode(msg)
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var resposta protocol.Mensagem
+	if err := json.NewDecoder(conn).Decode(&resposta); err == nil && resposta.Tipo == protocol.TipoACK {
+		fmt.Printf("✅ Confirmado: Ocorrência %s aceita pelo líder!\n", ocorrencia.ID)
+	} else {
+		fmt.Printf("⚠️  Mensagem enviada, aguardando processamento...\n")
+	}
+}
