@@ -169,7 +169,14 @@ func main() {
 // ============================================================
 
 func (b *Broker) Start() {
-	ln, err := net.Listen("tcp", b.Endereco)
+	// Extrai apenas a porta para escutar em qualquer IP
+	_, porta, err := net.SplitHostPort(b.Endereco)
+	if err != nil {
+		fmt.Printf("[Broker %d] Erro ao extrair porta de %s: %v\n", b.ID, b.Endereco, err)
+		os.Exit(1)
+	}
+
+	ln, err := net.Listen("tcp", "0.0.0.0:"+porta)
 	if err != nil {
 		fmt.Printf("[Broker %d] Erro ao iniciar: %v\n", b.ID, err)
 		os.Exit(1)
