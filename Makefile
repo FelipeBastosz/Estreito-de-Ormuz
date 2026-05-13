@@ -12,8 +12,11 @@ pc2:
 
 # Limpeza total (incluindo volumes de persistência)
 clean:
-	@echo "🧹 Resetando o sistema e apagando memórias..."
-	docker-compose down -v
+	@echo "🧹 Limpando sistema e apagando volumes de persistência..."
+	docker-compose down -v --remove-orphans
+	@echo "🔫 Caçando clientes soltos em background..."
+	@-docker ps -a -q --filter "name=client-run" | xargs -r docker rm -f
+	@echo "✅ Limpeza total concluída!"
 
 # Iniciar Cliente CLI (Ex: make client IP=127.0.0.1)
 client:
