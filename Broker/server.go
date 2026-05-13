@@ -39,7 +39,7 @@ func (b *Broker) encerrarSistema() {
 
 	go func() {
 		<-sc // Fica bloqueado aqui até receber o sinal
-		fmt.Printf("\n[Broker %d] [SISTEMA] Iniciando desligamento ordenado (Graceful Shutdown)...\n", b.ID)
+		fmt.Printf("\n[Broker %d] [SISTEMA] Desligando o servidor...\n", b.ID)
 
 		b.mu.Lock()
 		isCoordenador := (b.ID == b.Coordenador)
@@ -178,10 +178,10 @@ func (b *Broker) Start() {
 
 	ln, err := net.Listen("tcp", "0.0.0.0:"+porta)
 	if err != nil {
-		fmt.Printf("[Broker %d] Erro ao iniciar: %v\n", b.ID, err)
+		fmt.Printf("[Broker %d] Erro ao iniciar na porta %s: %v\n", b.ID, porta, err)
 		os.Exit(1)
 	}
-	fmt.Printf("[Broker %d] Escutando em %s\n", b.ID, b.Endereco)
+	fmt.Printf("[Broker %d] Escutando no IP real da máquina, porta %s\n", b.ID, porta)
 
 	for {
 		conn, err := ln.Accept()
@@ -530,9 +530,9 @@ func (b *Broker) enviarComandoAoDrone(enderecoDrone string, droneID string, ocor
 	if err == nil {
 		defer conn.Close()
 		if err := json.NewEncoder(conn).Encode(msg); err == nil {
-			// 3. AGUARDA O ACK: O diferencial está aqui.
-			// O Broker agora espera o Drone dizer "Ok, aceitei e vou voar".
-			conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+			// Vai aguarda o ACK (resposta) do drone.
+			// Então, o Broker agora espera o Drone dizer que está OK para voar.
+			conn.SetReadDeadline(time.Now().Add(2 * time.Second)) //Determina um tempo máximo de 2 segundos para uma resposta do drone
 			var resposta protocol.Mensagem
 			if err := json.NewDecoder(conn).Decode(&resposta); err == nil {
 				if resposta.Tipo == protocol.TipoACK {
@@ -542,16 +542,18 @@ func (b *Broker) enviarComandoAoDrone(enderecoDrone string, droneID string, ocor
 		}
 	}
 
+	//Se ele conseguiu contatar o drone e ele respondeu que está disponível, enviamos ele para requisição
 	if sucesso {
 		go b.monitorarMissao(droneID, ocorrencia)
 	}
 
+	//Se ele não aceitou a missão, devolvemos a ocorrência para fila de requisições
 	if !sucesso {
 		fmt.Printf("[Broker %d] Drone %s REJEITOU ou está OFFLINE! Devolvendo ocorrência %s para a fila.\n",
 			b.ID, droneID, ocorrencia.ID)
 
 		b.mu.Lock()
-		// 4. Devolve a tarefa para o topo da fila de prioridade
+		//Devolve a requisição para o topo da fila de prioridade
 		heap.Push(&b.Estado.FilaEspera, ocorrencia)
 
 		if drone, ok := b.Estado.Drones[droneID]; ok {
@@ -562,10 +564,10 @@ func (b *Broker) enviarComandoAoDrone(enderecoDrone string, droneID string, ocor
 		}
 		b.mu.Unlock()
 
-		// 5. Notifica o cluster sobre a mudança na fila e no status do drone
+		// Notifica os outros Brokers sobre a mudança na fila e no status do drone
 		b.sincronizarEstado()
 
-		// 6. Tenta outro drone imediatamente (talvez o Drone 1 esteja livre para cobrir o Drone 2)
+		// Tenta outro drone imediatamente (talvez o Drone 1 esteja livre para cobrir o Drone 2)
 		go b.tentarDespacharDrone()
 	}
 }
@@ -579,23 +581,23 @@ func (b *Broker) monitorarMissao(droneID string, ocorrencia *protocol.Ocorrencia
 	b.mu.Lock()
 	drone, existe := b.Estado.Drones[droneID]
 
-	// Se passaram 20s e o drone AINDA está marcado com essa mesma missão, ele caiu!
+	// Se passaram 20 segundos e o drone ainda está marcado com essa mesma missão, ele caiu!
 	if existe && drone.MissaoID == ocorrencia.ID {
-		fmt.Printf("\n🚨 [ALERTA CRÍTICO] Broker %d perdeu sinal do Drone %s no ar!\n", b.ID, droneID)
-		fmt.Printf("🚨 Removendo drone da frota e reenfileirando a ocorrência %s...\n", ocorrencia.ID)
+		fmt.Printf("\n[ALERTA CRÍTICO] Broker %d perdeu sinal do Drone %s no ar!\n", b.ID, droneID)
+		fmt.Printf("[AÇÃO] Removendo drone %s da frota e reenfileirando a ocorrência %s...\n", droneID, ocorrencia.ID)
 
-		// 1. Remove o drone permanentemente da RAM do sistema
+		// Remove o drone da lista de drones do sistema
 		delete(b.Estado.Drones, droneID)
 
-		// 2. Salva a missão devolvendo-a para o topo da fila
+		// Salva a missão devolvendo para o topo da fila
 		heap.Push(&b.Estado.FilaEspera, ocorrencia)
 
 		b.mu.Unlock()
 
-		// 3. Atualiza todo o cluster sobre a perda do equipamento e o aumento da fila
+		// 3. Atualiza todos os brokers sobre a perda do equipamento e o aumento da fila
 		b.sincronizarEstado()
 
-		// 4. Manda um novo drone imediatamente para não atrasar a emergência
+		// Tenta mandar um novo drone imediatamente para não atrasar a emergência
 		go b.tentarDespacharDrone()
 		return
 	}
