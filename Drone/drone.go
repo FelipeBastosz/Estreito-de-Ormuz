@@ -62,12 +62,21 @@ func main() {
 // ============================================================
 
 func (d *Drone) escutar() {
-	ln, err := net.Listen("tcp", d.Endereco)
+	// 1. Extrai APENAS a porta do endereço que veio do docker-compose
+	// Exemplo: de "192.168.15.13:9091", ele pega só o "9091"
+	_, porta, err := net.SplitHostPort(d.Endereco)
 	if err != nil {
-		fmt.Printf("[Drone %s] Erro ao abrir porta %s: %v\n", d.ID, d.Endereco, err)
+		fmt.Printf("[Drone %s] Erro ao extrair porta de %s: %v\n", d.ID, d.Endereco, err)
 		os.Exit(1)
 	}
-	fmt.Printf("[Drone %s] Pronto em %s\n", d.ID, d.Endereco)
+
+	// 2. Força o servidor TCP a escutar internamente em 0.0.0.0 (Obrigatório para Docker)
+	ln, err := net.Listen("tcp", "0.0.0.0:"+porta)
+	if err != nil {
+		fmt.Printf("[Drone %s] Erro ao abrir porta %s: %v\n", d.ID, porta, err)
+		os.Exit(1)
+	}
+	fmt.Printf("[Drone %s] Pronto em 0.0.0.0:%s (Registrado externamente como %s)\n", d.ID, porta, d.Endereco)
 
 	for {
 		conn, err := ln.Accept()
