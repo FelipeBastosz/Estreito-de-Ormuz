@@ -19,7 +19,7 @@ WORKDIR /app
 
 # Copia binário compilado e configuração Docker
 COPY --from=builder /out/broker .
-COPY config.docker.json .
+COPY config.json .
 
 # Diretório de persistência de estado
 RUN mkdir -p /app/state

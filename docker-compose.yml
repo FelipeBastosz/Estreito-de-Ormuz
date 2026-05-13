@@ -30,9 +30,10 @@ services:
       dockerfile: Dockerfile.broker
     command: ["1"]
     environment:
-      CONFIG_PATH: /app/config.docker.json
+      CONFIG_PATH: /app/config.json
     volumes:
       - state-broker1:/app/state
+      - ./config.json:/app/config.json
     networks:
       - ormuz-net
     ports:
@@ -45,9 +46,10 @@ services:
       dockerfile: Dockerfile.broker
     command: ["2"]
     environment:
-      CONFIG_PATH: /app/config.docker.json
+      CONFIG_PATH: /app/config.json
     volumes:
       - state-broker2:/app/state
+      - ./config.json:/app/config.json
     networks:
       - ormuz-net
     ports:
@@ -60,9 +62,10 @@ services:
       dockerfile: Dockerfile.broker
     command: ["3"]
     environment:
-      CONFIG_PATH: /app/config.docker.json
+      CONFIG_PATH: /app/config.json
     volumes:
       - state-broker3:/app/state
+      - ./config.json:/app/config.json
     networks:
       - ormuz-net
     ports:
@@ -75,9 +78,10 @@ services:
       dockerfile: Dockerfile.broker
     command: ["4"]
     environment:
-      CONFIG_PATH: /app/config.docker.json
+      CONFIG_PATH: /app/config.json
     volumes:
       - state-broker4:/app/state
+      - ./config.json:/app/config.json
     networks:
       - ormuz-net
     ports:
@@ -86,8 +90,6 @@ services:
 
   # ============================================================
   # DRONES (frota compartilhada entre todos os setores)
-  # Todos se registram no broker1; o coordenador pode ser qualquer um.
-  # O endereço do broker pode ser qualquer broker local — ele repassa ao coordenador.
   # ============================================================
 
   drone1:
@@ -97,6 +99,8 @@ services:
     command: ["drone1", "drone1:9091", "broker1:9081"]
     networks:
       - ormuz-net
+    ports:
+      - "9091:9091"
     depends_on:
       - broker1
     restart: on-failure
@@ -108,6 +112,8 @@ services:
     command: ["drone2", "drone2:9092", "broker2:9082"]
     networks:
       - ormuz-net
+    ports:
+      - "9092:9092"
     depends_on:
       - broker2
     restart: on-failure
@@ -119,6 +125,8 @@ services:
     command: ["drone3", "drone3:9093", "broker3:9083"]
     networks:
       - ormuz-net
+    ports:
+      - "9093:9093"
     depends_on:
       - broker3
     restart: on-failure
@@ -127,17 +135,18 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.drone
-    command: ["drone4", "drone4:9094", "broker1:9081"]
+    # Corrigido para apontar e depender do broker4
+    command: ["drone4", "drone4:9094", "broker4:9084"]
     networks:
       - ormuz-net
+    ports:
+      - "9094:9094"
     depends_on:
-      - broker1
+      - broker4
     restart: on-failure
 
   # ============================================================
   # SENSORES (cada setor tem 2 sensores independentes)
-  # Cada sensor envia para o broker do seu próprio setor.
-  # Configurar SENSOR_INTERVALO_MIN/MAX para ajustar a carga.
   # ============================================================
 
   # Setor 1 (broker1)
@@ -255,3 +264,15 @@ services:
     depends_on:
       - broker4
     restart: on-failure
+
+  # ============================================================
+  # CLIENTE INTERATIVO (Injeção Manual de Dados)
+  # ============================================================
+  client:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    networks:
+      - ormuz-net
+    stdin_open: true
+    tty: true

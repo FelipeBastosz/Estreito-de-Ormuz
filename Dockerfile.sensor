@@ -1,4 +1,3 @@
-# ── Etapa 1: Compilação ──────────────────────────────────────
 FROM golang:1.26-alpine AS builder
 
 WORKDIR /src
@@ -7,7 +6,6 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/sensor ./Sensor/
 
-# ── Etapa 2: Imagem final ─────────────────────────────────────
 FROM alpine:3.19
 
 WORKDIR /app
