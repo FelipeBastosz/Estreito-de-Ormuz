@@ -208,7 +208,7 @@ func (b *Broker) verificarCoordenador() {
 	//Tenta realizar uma conexão rápida com o coordenador só para ver se ele tá vivo e espera 2 segundos para receber uma resposta
 	conn, err := net.DialTimeout("tcp", b.OutrosBrokers[coordID], 2*time.Second)
 	if err != nil {
-		//Se o Coordenador não respondeu, assumo que ele morreu. Então, aviso esse problema e inicio uma nova votação
+		//Se o Coordenador não respondeu, assumo que ele morreu. Então, aviso esse problema e dá início a uma nova votação
 		fmt.Printf("[Broker %d] Líder %d offline! Convocando nova eleição.\n", b.ID, coordID)
 		go b.IniciarEleicao()
 	} else { //Se ainda existir, apenas fecho a conexão
@@ -269,7 +269,7 @@ func (b *Broker) LidarComMensagem(conn net.Conn) {
 		if err := json.Unmarshal([]byte(msg.Payload), &novoEstado); err == nil {
 			b.mu.Lock()
 			b.Estado = &novoEstado
-			heap.Init(&b.Estado.FilaEspera) // Re-inicializa o Heap para garantir ordem
+			heap.Init(&b.Estado.FilaEspera) // Reinicializa o Heap para garantir ordem
 			b.mu.Unlock()
 			fmt.Printf("[Broker %d] Estado sincronizado com o Coordenador %d\n", b.ID, msg.IDOrigem)
 		}

@@ -22,13 +22,12 @@ func main() {
 	enderecoBroker := os.Args[1]
 	reader := bufio.NewReader(os.Stdin)
 
-	fmt.Println("==================================================")
-	fmt.Println("   Terminal de Comando - Estreito de Ormuz        ")
-	fmt.Println("==================================================")
+	menu()
 	fmt.Printf("Conectado ao Broker: %s\n\n", enderecoBroker)
 
 	contador := 1
 	for {
+		menu()
 		fmt.Print("Digite a descrição da Ocorrência (ou 'sair'): ")
 		descricao, _ := reader.ReadString('\n')
 		descricao = strings.TrimSpace(descricao)
@@ -84,4 +83,10 @@ func enviarOcorrencia(ipDestino string, ocorrencia protocol.Ocorrencia) {
 	} else {
 		fmt.Printf("⚠️  Mensagem enviada, aguardando processamento...\n")
 	}
+}
+
+func menu() {
+	fmt.Println("==================================================")
+	fmt.Println("   Terminal de Comando - Estreito de Ormuz        ")
+	fmt.Println("==================================================")
 }
