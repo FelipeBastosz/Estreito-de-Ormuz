@@ -264,6 +264,26 @@ func (b *Broker) LidarComMensagem(conn net.Conn) {
 
 	// Sincroniza o estado do líder com o meu
 	case protocol.TipoSyncEstado:
+		// MECANISMO ANTI SPLIT-BRAIN (Cura de Hibernação)
+		if msg.IDOrigem < b.ID {
+			// Um broker menor que eu está enviando estado como se fosse o líder.
+			// Isso significa que eu fiquei offline/dormindo, e ele tomou o poder.
+			// Como eu acordei e sou maior, retomo o controle chamando eleição!
+			fmt.Printf("\n[SPLIT-BRAIN] Falso líder BROKER%d detectado! Eu sou o BROKER%d e vou retomar o controle.\n", msg.IDOrigem, b.ID)
+			go b.IniciarEleicao()
+			return // Descarta esse estado, pois a fila dele pode estar desatualizada
+		}
+
+		if msg.IDOrigem > b.ID {
+			// Um broker maior que eu mandou o estado. Ele é o verdadeiro chefe.
+			b.mu.Lock()
+			if b.Coordenador != msg.IDOrigem {
+				fmt.Printf("\n[SPLIT-BRAIN] Reconhecendo o retorno do líder superior: %d\n", msg.IDOrigem)
+				b.Coordenador = msg.IDOrigem
+			}
+			b.mu.Unlock()
+		}
+
 		// Recebe backup do líder e atualiza a memória local
 		var novoEstado state.GlobalState
 		if err := json.Unmarshal([]byte(msg.Payload), &novoEstado); err == nil {
