@@ -328,7 +328,7 @@ func (b *Broker) LidarComMensagem(conn net.Conn) {
 
 				//Crio uma função paralela para reenviar as mensagens
 				go func(reenviarMsg protocol.Mensagem) {
-					fmt.Print("[Broker %d] Tentando reenviar pendência %s para o coordenador %d\n", b.ID, reenviarMsg.IDOrigem, msg.IDOrigem)
+					fmt.Printf("[Broker %d] Tentando reenviar pendência %s para o coordenador %d\n", b.ID, reenviarMsg.IDOrigem, msg.IDOrigem)
 
 					//Tenta reenviar a mensagem e espera uma resposta do coordenador
 					//Se retornar false, sabemos que deu erro a comunicação com o servidor
