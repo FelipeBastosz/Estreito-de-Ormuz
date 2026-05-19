@@ -20,6 +20,7 @@ type Drone struct {
 	Status         string // "disponivel", "em_missao", "recarregando"
 	Bateria        int
 	mu             sync.Mutex
+	Brokers        []string // lista de brokers para responder
 }
 
 func main() {
