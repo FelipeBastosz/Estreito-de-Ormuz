@@ -7,11 +7,13 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"sort"
+	"strconv"
 	"sync"
 	"time"
 )
 
-// Drone representa um drone físico autônomo de monitoramento.
+// Drone representa um drone físico monitoramento.
 // Escuta comandos TCP, executa missões simuladas e reporta conclusão ao broker.
 type Drone struct {
 	ID             string
@@ -287,6 +289,7 @@ func (d *Drone) reregistroPeriodico() {
 	}
 }
 
+// Tenta enviar ao broker principal. Se falhar, tenta outros brokers conhecidos.
 func (d *Drone) enviarParaBroker(msg protocol.Mensagem) bool {
 	// 1) tenta broker principal
 	if d.tentarEnvio(d.EnderecoBroker, msg) {
@@ -310,9 +313,32 @@ func (d *Drone) enviarParaBroker(msg protocol.Mensagem) bool {
 func (d *Drone) tentarEnvio(addr string, msg protocol.Mensagem) bool {
 	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
 	if err != nil {
-		fmt.Printf("[Drone %s] Broker %s indisponível: %v\n", d.ID, d.EnderecoBroker, err)
+		fmt.Printf("[Drone %s] Broker %s indisponível: %v\n", d.ID, addr, err)
 		return false
 	}
 	defer conn.Close()
 	return json.NewEncoder(conn).Encode(msg) == nil
+}
+
+// Lê brokers do config.json para recuperação, caso o broker que estamos conectados caia
+func carregarBrokers(caminho string) ([]string, error) {
+	arquivo, err := os.ReadFile(caminho)
+	if err != nil {
+		return nil, err
+	}
+	mapaString := make(map[string]string)
+	json.Unmarshal(arquivo, &mapaString)
+
+	ids := make([]int, 0, len(mapaString))
+	for k := range mapaString {
+		id, _ := strconv.Atoi(k)
+		ids = append(ids, id)
+	}
+	sort.Ints(ids)
+
+	brokers := make([]string, 0, len(ids))
+	for _, id := range ids {
+		brokers = append(brokers, mapaString[strconv.Itoa(id)])
+	}
+	return brokers, nil
 }
