@@ -42,6 +42,15 @@ func main() {
 		Bateria:        100,
 	}
 
+	// Carrega lista de brokers para recuperação se CONFIG_PATH estiver disponível
+	configPath := os.Getenv("CONFIG_PATH")
+	if configPath == "" {
+		configPath = "../config.json"
+	}
+	if brokers, err := carregarBrokers(configPath); err == nil {
+		drone.Brokers = brokers
+	}
+
 	rand.Seed(time.Now().UnixNano())
 
 	// Começa a ouvir comandos em paralelo
