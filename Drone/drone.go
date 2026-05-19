@@ -288,7 +288,27 @@ func (d *Drone) reregistroPeriodico() {
 }
 
 func (d *Drone) enviarParaBroker(msg protocol.Mensagem) bool {
-	conn, err := net.DialTimeout("tcp", d.EnderecoBroker, 2*time.Second)
+	// 1) tenta broker principal
+	if d.tentarEnvio(d.EnderecoBroker, msg) {
+		return true
+	}
+
+	// 2) tenta brokers fallback
+	for _, addr := range d.Brokers {
+		if addr == d.EnderecoBroker {
+			continue
+		}
+		if d.tentarEnvio(addr, msg) {
+			d.EnderecoBroker = addr
+			return true
+		}
+	}
+	return false
+}
+
+// Vai tentar enviar uma mensagem ao broker, caso ele não consiga, aponta erro.
+func (d *Drone) tentarEnvio(addr string, msg protocol.Mensagem) bool {
+	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
 	if err != nil {
 		fmt.Printf("[Drone %s] Broker %s indisponível: %v\n", d.ID, d.EnderecoBroker, err)
 		return false
