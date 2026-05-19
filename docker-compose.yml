@@ -96,7 +96,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.drone
-    command: ["drone1", "192.168.15.13:9091", "broker1:9081"]
+    command: ["drone1", "drone1:9091", "broker1:9081"]
     networks:
       - ormuz-net
     ports:
@@ -109,7 +109,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.drone
-    command: ["drone2", "192.168.15.13:9092", "broker2:9082"]
+    command: ["drone2", "drone2:9092", "broker2:9082"]
     networks:
       - ormuz-net
     ports:
@@ -122,7 +122,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.drone
-    command: ["drone3", "drone3:9093", "192.168.15.18:9083"]
+    command: ["drone3", "drone3:9093", "broker3:9083"]
     networks:
       - ormuz-net
     ports:
@@ -136,7 +136,7 @@ services:
       context: .
       dockerfile: Dockerfile.drone
     # Corrigido para apontar e depender do broker4
-    command: ["drone4", "drone4:9094", "192.168.15.18:9084"]
+    command: ["drone4", "drone4:9094", "broker4:9084"]
     networks:
       - ormuz-net
     ports:
