@@ -3,6 +3,7 @@ FROM golang:1.26-alpine AS builder
 
 WORKDIR /src
 COPY go.mod ./
+
 COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/drone ./Drone/
@@ -10,9 +11,16 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /out/drone ./Drone/
 # ── Etapa 2: Imagem final ─────────────────────────────────────
 FROM alpine:3.19
 
+# Define o diretório de trabalho principal
 WORKDIR /app
+
+# Copia o executável compilado na Etapa 1
 COPY --from=builder /out/drone .
 
+# Garante que a variável aponte exatamente
+# para onde o docker-compose vai montar o volume, caso ele falte por algum motivo.
+ENV CONFIG_PATH=/app/config.json
+
 # Argumentos: [ID_DRONE] [ENDERECO_PROPRIO] [ENDERECO_BROKER]
-# Exemplo:    drone1 0.0.0.0:9091 broker1:9081
+# Exemplo:    drone1 drone1:9091 broker1:9081
 ENTRYPOINT ["/app/drone"]
