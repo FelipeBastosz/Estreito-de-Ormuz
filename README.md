@@ -84,11 +84,22 @@ O diagrama abaixo ilustra o processamento de uma ocorrência `Crítica`. O Coord
 
 ![Fluxo de Despacho de Ocorrência](Docs/diagrama_fluxo_ocorrencia.png)
 
-### 3. Manutenção e Encerramento (Graceful Handoff)
+### 3. Lógica de Processamento e Despacho Distribuído
+O fluxograma abaixo detalha como um Broker processa uma mensagem genérica (`protocol.Mensagem`). Ele ilustra o desvio de tráfego (roteamento entre setores para centralizar ocorrências no Líder) e, por fim, como a rotina assíncrona do Coordenador consulta a Max-Heap e a frota disponível para **enviar o comando TCP direto ao Atuador (Drone)**, iniciando a missão.
+
+![Lógica de Processamento e Despacho de Drones](Docs/diagrama_logico_despacho.png)
+
+### 4. Algoritmo de Priorização da Fila de Requisições
+Para garantir que os recursos do sistema sejam alocados de forma inteligente, as ocorrências são ordenadas por uma fila de prioridade (Max-Heap). A estrutura garante exclusão e prioridade máxima baseada em duas regras:
+1. **Criticidade (Nível 3 > 2 > 1):** Incidentes graves furam a fila instantaneamente.
+2. **Tempo (Desempate):** Em caso de mesma criticidade, a ocorrência registrada primeiro tem precedência.
+
+![Estrutura da Árvore](Docs/diagrama_heap_arvore.png)
+
+### 5. Manutenção e Encerramento (Graceful Handoff)
 Para evitar problemas durante desligamentos programados (como um `docker stop`), o líder implementa um mecanismo de desligamento. Ele escolhe o próximo sucessor vivo e repassa a coordenação instantaneamente.
 
 ![Fluxo de Transferência Limpa (Handoff)](Docs/diagrama_handoff.png)
-
 
 ---
 ## 📂 Estrutura do Projeto
