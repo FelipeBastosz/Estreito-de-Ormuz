@@ -2,15 +2,9 @@ package state
 
 import (
 	"Desbloqueio-do-Estreito-de-Ormuz/Protocol"
-	"sync"
 )
 
-// fileMutex é o nosso cadeado.
-// Impede que duas Goroutines tentem abrir e escrever no arquivo state.json NO MESMO MILISSEGUNDO,
-// o que corromperia o arquivo e destruiria os dados.
-var fileMutex sync.Mutex
-
-// GlobalState é a foto inteira do sistema no momento exato.
+// GlobalState é a foto inteira (Estado atual) do sistema no momento exato.
 type GlobalState struct {
 	Drones     map[string]*protocol.Drone `json:"drones"`
 	FilaEspera FilaPrioridade             `json:"fila_espera"`

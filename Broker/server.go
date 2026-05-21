@@ -16,26 +16,33 @@ import (
 	"time"
 )
 
-// Cada Broker representa um setor do sistema. Sincroniza e colabora para despachar drones.
+// Broker representa um nó do sistema distribuído.
+// Cada broker gerencia um setor do Estreito de Ormuz.
 type Broker struct {
-	ID                 int
-	Endereco           string
-	OutrosBrokers      map[int]string
-	Coordenador        int
-	Estado             *state.GlobalState
-	mu                 sync.Mutex
-	MensagensPendentes []protocol.Mensagem
-	UltimaSync         time.Time
-	Encerrando         bool
+	ID                 int                 // Guarda o ID do broker
+	Endereco           string              // Guarda o endereço IP/porta do servidor
+	OutrosBrokers      map[int]string      // Mapa de conexão com os outros brokers
+	Coordenador        int                 // ID do líder atual (-1 se indefinido)
+	Estado             *state.GlobalState  // Estado volátil em RAM (drones e fila)
+	mu                 sync.Mutex          // Garante exclusão mútua no acesso ao estado
+	MensagensPendentes []protocol.Mensagem // Buffer de espera
+	UltimaSync         time.Time           // Marca a última sincronização recebida
+	Encerrando         bool                // Indica se o broker está encerrando
 }
 
-// Listen para sinais de sistema e executa shutdown limpo.
-// Se eu for coordenador, aviso quem deve assumir.
+// ============================================================
+// FINALIZAÇÃO DO SISTEMA
+// ============================================================
+
+// encerrarSistema prepara o broker para encerrar de forma limpa.
+// Se este broker for o coordenador, ele transfere a liderança para um sucessor vivo.
 func (b *Broker) encerrarSistema() {
 	sc := make(chan os.Signal, 1)
+	// Escuta se o usuário der Ctrl+C ou o Docker mandar parar
 	signal.Notify(sc, os.Interrupt, syscall.SIGTERM)
+
 	go func() {
-		<-sc
+		<-sc // Fica bloqueado aqui até receber o sinal
 
 		// Ativa a flag de que o servidor está encerrando
 		b.mu.Lock()
@@ -69,12 +76,14 @@ func (b *Broker) encerrarSistema() {
 	}()
 }
 
-// Garante que o sucesso do coordenador será o próximo broker com maior ID vivo.
+// escolherSucessorVivo retorna o broker vivo com maior ID.
+// Garante que o sucesso do coordenador será o próximo broker ativo, evitando passar a liderança para um nó caído.
 func (b *Broker) escolherSucessorVivo() int {
 	ids := make([]int, 0, len(b.OutrosBrokers))
 	for id := range b.OutrosBrokers {
 		ids = append(ids, id)
 	}
+	// Ordena os IDs de forma decrescente
 	sort.Sort(sort.Reverse(sort.IntSlice(ids)))
 
 	for _, id := range ids {
@@ -88,7 +97,11 @@ func (b *Broker) escolherSucessorVivo() int {
 	return -1
 }
 
-// Carrega as configurações dos IPs dos brokers
+// ============================================================
+// INICIALIZAÇÃO E SINCRONIZAÇÃO INICIAL
+// ============================================================
+
+// carregarConfiguracao lê o mapa de rede do arquivo JSON.
 func carregarConfiguracao(caminho string) (map[int]string, error) {
 	arquivo, err := os.ReadFile(caminho)
 	if err != nil {
@@ -104,7 +117,8 @@ func carregarConfiguracao(caminho string) (map[int]string, error) {
 	return mapaFinal, nil
 }
 
-// O coordenador envia periodicamente atualizações do estado para garantir sincronização entre todos os brokers
+// sincronizarPeriodicamente é rodado em uma goroutine e envia o estado para a rede a cada 2s.
+// Garante que todos os brokers tenham a mesma visão do cluster (apenas o coordenador envia).
 func (b *Broker) sincronizarPeriodicamente() {
 	ticker := time.NewTicker(2 * time.Second)
 	for range ticker.C {
@@ -114,7 +128,7 @@ func (b *Broker) sincronizarPeriodicamente() {
 	}
 }
 
-// Pede o estado aos outros brokers assim que é inicializado
+// solicitarEstado pede o estado atual aos outros brokers assim que este servidor é inicializado.
 func (b *Broker) solicitarEstado() {
 	msg := protocol.Mensagem{
 		Tipo:     protocol.TipoPedidoEstado,
@@ -125,7 +139,7 @@ func (b *Broker) solicitarEstado() {
 	}
 }
 
-// Espera até x segundos ou até receber sync de estado (UltimaSync setado)
+// esperarSync bloqueia a execução até receber um estado atualizado ou até o tempo limite (timeout) expirar.
 func (b *Broker) esperarSync(timeout time.Duration) {
 	limite := time.After(timeout)
 	tick := time.NewTicker(200 * time.Millisecond)
@@ -145,32 +159,38 @@ func (b *Broker) esperarSync(timeout time.Duration) {
 	}
 }
 
-// Verifica de é o coordenador
+// isCoordinator é utilizado para verificar se este broker é o líder atual.
 func (b *Broker) isCoordinator() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.Coordenador == b.ID
 }
 
+// Função principal do Broker, onde ele é inicializado
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Uso: broker [ID]")
 		return
 	}
 	id, _ := strconv.Atoi(os.Args[1])
+
+	// Permite sobrescrever o caminho do config via variável de ambiente
 	configPath := os.Getenv("CONFIG_PATH")
 	if configPath == "" {
 		configPath = "../config.json"
 	}
+
 	mapaRede, err := carregarConfiguracao(configPath)
 	if err != nil {
 		fmt.Printf("[Broker %d] Erro ao ler config: %v\n", id, err)
 		return
 	}
+
 	meuEndereco, existe := mapaRede[id]
 	if !existe {
 		return
 	}
+
 	outros := make(map[int]string)
 	for k, v := range mapaRede {
 		if k != id {
@@ -178,13 +198,16 @@ func main() {
 		}
 	}
 
+	// Inicializa o estado vazio
 	estadoInicial := &state.GlobalState{
 		Drones:       make(map[string]*protocol.Drone),
 		FilaEspera:   make(state.FilaPrioridade, 0),
 		UltimoUpdate: time.Now().Unix(),
 	}
+	// Inicializa a fila de requisições
 	heap.Init(&estadoInicial.FilaEspera)
 
+	// Inicializa o Broker
 	broker := &Broker{
 		ID:                 id,
 		Endereco:           meuEndereco,
@@ -194,10 +217,14 @@ func main() {
 		MensagensPendentes: make([]protocol.Mensagem, 0),
 	}
 
+	// Inicia o servidor TCP e rotinas de segundo plano
 	go broker.Start()
 	go broker.sincronizarPeriodicamente()
+
+	// Fica esperando um Ctrl+C ou algum sinal de interrupção para finalizar o sistema
 	broker.encerrarSistema()
 
+	// Verifica se o coordenador está vivo a cada 5 segundos
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
 		for range ticker.C {
@@ -205,13 +232,18 @@ func main() {
 		}
 	}()
 
+	// Solicita o estado da rede e aguarda até 5 segundos para sincronizar antes de tomar decisões
 	broker.solicitarEstado()
 	broker.esperarSync(5 * time.Second)
 
+	// Dá uma pausa extra para estabilização dos brokers
 	time.Sleep(2 * time.Second)
+
 	broker.mu.Lock()
 	semLider := (broker.Coordenador == -1)
 	broker.mu.Unlock()
+
+	// Se a rede não tem líder após o período de sincronização, inicia eleição
 	if semLider {
 		broker.IniciarEleicao()
 	} else {
@@ -221,9 +253,14 @@ func main() {
 		fmt.Printf("[Broker %d] Entrei na rede, coordenador ativo: %d\n", broker.ID, coordAtual)
 	}
 
-	select {}
+	select {} // Bloqueia a main para o processo não encerrar
 }
 
+// ============================================================
+// SERVIDOR E MONITORAMENTO
+// ============================================================
+
+// Start inicia o servidor TCP do broker.
 func (b *Broker) Start() {
 	_, porta, err := net.SplitHostPort(b.Endereco)
 	if err != nil {
@@ -245,6 +282,8 @@ func (b *Broker) Start() {
 	}
 }
 
+// verificarCoordenador tenta pingar o coordenador atual.
+// Se falhar, convoca uma nova eleição.
 func (b *Broker) verificarCoordenador() {
 	b.mu.Lock()
 	coordID := b.Coordenador
@@ -262,6 +301,11 @@ func (b *Broker) verificarCoordenador() {
 	}
 }
 
+// ============================================================
+// GESTÃO DE ESTADO E MENSAGENS
+// ============================================================
+
+// sincronizarEstado envia o estado atual para todos os outros brokers.
 func (b *Broker) sincronizarEstado() {
 	b.mu.Lock()
 	payload, _ := json.Marshal(b.Estado)
@@ -277,10 +321,11 @@ func (b *Broker) sincronizarEstado() {
 	}
 }
 
+// LidarComMensagem processa mensagens recebidas no servidor TCP do broker.
 func (b *Broker) LidarComMensagem(conn net.Conn) {
 	defer conn.Close()
 
-	//Se o broker está morrendo, ele não recebe mais a mensagem
+	// Se o broker está morrendo, ele não recebe mais a mensagem
 	b.mu.Lock()
 	if b.Encerrando {
 		b.mu.Unlock()
@@ -294,6 +339,10 @@ func (b *Broker) LidarComMensagem(conn net.Conn) {
 	}
 
 	switch msg.Tipo {
+
+	// ============================================================
+	// ELEIÇÃO: algoritmo do valentão
+	// ============================================================
 	case protocol.TipoEleicao:
 		if msg.IDOrigem < b.ID {
 			fmt.Printf("[Broker %d] ID %d quer liderar, mas sou maior. Assumindo eleição!\n", b.ID, msg.IDOrigem)
@@ -303,11 +352,16 @@ func (b *Broker) LidarComMensagem(conn net.Conn) {
 		}
 	case protocol.TipoOkEleicao:
 		fmt.Printf("[Broker %d] Recebi OK de broker %d (existe alguém maior vivo).\n", b.ID, msg.IDOrigem)
+
+	// ============================================================
+	// SINCRONIZAÇÃO DE ESTADO
+	// ============================================================
 	case protocol.TipoPedidoEstado:
 		b.mu.Lock()
 		isCoord := (b.ID == b.Coordenador)
 		encerrando := b.Encerrando
 		b.mu.Unlock()
+		// Se ele não estiver encerrando e for o Coordenador, ele envia o estado atual dele para os outros brokers
 		if !encerrando && isCoord {
 			if endereco, ok := b.OutrosBrokers[msg.IDOrigem]; ok {
 				b.mu.Lock()
@@ -322,10 +376,13 @@ func (b *Broker) LidarComMensagem(conn net.Conn) {
 				b.enviarMensagem(endereco, resp)
 			}
 		}
+	// Tipo para sincronizar o estado com o coordenador
 	case protocol.TipoSyncEstado:
+		// Verifica se o coordenador tem o ID menor que o broker atual
 		if msg.IDOrigem < b.ID {
 			fmt.Printf("\n[SPLIT-BRAIN] Líder menor BROKER%d detectado. Vou sincronizar com ele antes de retomar a liderança.\n", msg.IDOrigem)
 			var novoEstado state.GlobalState
+			//Recebe o estado atual do coordenador
 			if err := json.Unmarshal([]byte(msg.Payload), &novoEstado); err == nil {
 				b.mu.Lock()
 				b.Estado = &novoEstado
@@ -335,9 +392,11 @@ func (b *Broker) LidarComMensagem(conn net.Conn) {
 				b.mu.Unlock()
 				fmt.Printf("[Broker %d] Estado sincronizado com o Coordenador %d\n", b.ID, msg.IDOrigem)
 			}
+			// Inicia uma nova eleição para assumir a liderança
 			go b.IniciarEleicao()
 			return
 		}
+		// Se for eu coordenador e recebo sincronização de um coordenador maior, passo a liderança para ele
 		if msg.IDOrigem > b.ID {
 			b.mu.Lock()
 			if b.Coordenador != msg.IDOrigem {
@@ -346,6 +405,8 @@ func (b *Broker) LidarComMensagem(conn net.Conn) {
 			}
 			b.mu.Unlock()
 		}
+
+		// Sincroniza o estado recebido pelo coordenador
 		var novoEstado state.GlobalState
 		if err := json.Unmarshal([]byte(msg.Payload), &novoEstado); err == nil {
 			b.mu.Lock()
@@ -355,54 +416,74 @@ func (b *Broker) LidarComMensagem(conn net.Conn) {
 			b.mu.Unlock()
 			fmt.Printf("[Broker %d] Estado sincronizado com o Coordenador %d\n", b.ID, msg.IDOrigem)
 		}
+
+	// ============================================================
+	// HANDOFF E VITÓRIA
+	// ============================================================
+	// Ocorre quando o antigo coordenador morreu e agora eu assumo a liderança
 	case protocol.TipoHandoff:
 		fmt.Printf("[Broker %d] O antigo coordenador morreu. Assumindo a liderança\n", b.ID)
 		b.mu.Lock()
 		b.Coordenador = b.ID
 		b.mu.Unlock()
+		// Cria a mensagem de vitória para enviar aos brokers restantes
 		msgVitoria := protocol.Mensagem{
 			Tipo:      protocol.TipoVitoria,
 			IDOrigem:  b.ID,
 			Timestamp: time.Now(),
 		}
+		// Envia a todos os brokers que há um novo coordenador
 		for id, endereco := range b.OutrosBrokers {
 			if id < b.ID {
 				go b.enviarMensagem(endereco, msgVitoria)
 			}
 		}
+		// Começa a tentar despachar possíveis drones para atender as requisições
 		go b.tentarDespacharDrone()
+	// Ocorre quando um novo líder é eleito
 	case protocol.TipoVitoria:
 		b.mu.Lock()
+		// Atualiza o ID do novo coordenador
 		b.Coordenador = msg.IDOrigem
 		pendentes := b.MensagensPendentes
 		b.MensagensPendentes = nil
 		b.mu.Unlock()
 		fmt.Printf("[Broker %d] Novo Coordenador eleito: %d\n", b.ID, msg.IDOrigem)
+		// Se eu for o novo líder, começo a processar as requisições que ficaram pendentes
 		if msg.IDOrigem == b.ID {
 			for _, pendente := range pendentes {
 				go b.enviarMensagem(b.Endereco, pendente)
 			}
 			go b.tentarDespacharDrone()
-		} else {
+		} else { //Senão, tento reenviar as requisições pendentes para o coordenador
 			for _, pendente := range pendentes {
 				mensagemPendente := pendente
 				go func(reenviarMsg protocol.Mensagem) {
 					fmt.Printf("[Broker %d] Tentando reenviar pendência para o coordenador %d\n", b.ID, msg.IDOrigem)
+					// Antes de retirar as mensagens do buffer temporário, é verificado se as requisições estão chegando no coordenador
 					if !b.enviarMensagemComAck(b.OutrosBrokers[msg.IDOrigem], reenviarMsg) {
 						fmt.Printf("[Broker %d] LÍDER %d FALHOU no reenvio! Vai para buffer local.\n", b.ID, msg.IDOrigem)
 						b.mu.Lock()
 						b.MensagensPendentes = append(b.MensagensPendentes, reenviarMsg)
 						b.mu.Unlock()
+						// Se a mensagem não chegou, verifico se ele está vivo e caso não esteja, uma nova eleição é iniciada
 						go b.verificarCoordenador()
 					}
 				}(mensagemPendente)
 			}
 		}
+
+	// ============================================================
+	// OCORRÊNCIAS
+	// ============================================================
+	// São as ocorrências enviadas pelos sensores e outros brokers
 	case protocol.TipoOcorrencia:
 		var ocorrencia protocol.Ocorrencia
 		b.mu.Lock()
 		euSouCoord := b.Coordenador == b.ID
 		b.mu.Unlock()
+		// Se o broker é o coordenador, ele pega a requisição,
+		//coloca na fila de prioridades e sincroniza o seu estado com os outros brokers
 		if euSouCoord {
 			json.Unmarshal([]byte(msg.Payload), &ocorrencia)
 			if ocorrencia.Timestamp.IsZero() {
@@ -417,21 +498,24 @@ func (b *Broker) LidarComMensagem(conn net.Conn) {
 			fmt.Printf("[Broker %d] Ocorrência %s enfileirada (Prioridade %d). Fila: %d item(s)\n",
 				b.ID, ocorrencia.ID, ocorrencia.Prioridade, b.Estado.FilaEspera.Len())
 			go b.tentarDespacharDrone()
-		} else {
+		} else { //Senão, manda a requisição para o coordenador
 			b.mu.Lock()
 			temCoord := b.Coordenador != -1
 			coord := b.Coordenador
 			b.mu.Unlock()
 			if temCoord {
 				fmt.Printf("[Broker %d] Repassando ocorrência ao Coordenador %d\n", b.ID, coord)
+				// Verifica se o coordenador recebeu a requisição
 				if !b.enviarMensagemComAck(b.OutrosBrokers[coord], msg) {
 					fmt.Printf("[Broker %d] O Coordenador %d parou de responder, iniciar nova eleição!\n", b.ID, coord)
 					b.mu.Lock()
+					// Se não recebeu, colocamos de volta as requisições em um buffer
 					b.MensagensPendentes = append(b.MensagensPendentes, msg)
 					b.mu.Unlock()
+					// Inicia uma eleição para eleger um novo coordenador
 					go b.IniciarEleicao()
 				}
-			} else {
+			} else { //Se não tiver coordenador atualmente, a requisição vai para um buffer de requisições pendentes
 				fmt.Printf("[Broker %d] Sem coordenador no momento. Ocorrência %s ficará temporariamente em espera.\n",
 					b.ID, ocorrencia.ID)
 				b.mu.Lock()
@@ -439,6 +523,10 @@ func (b *Broker) LidarComMensagem(conn net.Conn) {
 				b.mu.Unlock()
 			}
 		}
+
+	// ============================================================
+	// DRONES
+	// ============================================================
 	case protocol.TipoRegistroDrone:
 		b.mu.Lock()
 		euSouCoord := b.Coordenador == b.ID
@@ -476,7 +564,7 @@ func (b *Broker) LidarComMensagem(conn net.Conn) {
 			if drone, existe := b.Estado.Drones[droneInfo.ID]; existe {
 				drone.Status = droneInfo.Status
 				drone.Bateria = droneInfo.Bateria
-				drone.MissaoID = ""
+				drone.MissaoID = "" // Libera da missão anterior
 			}
 			b.mu.Unlock()
 			b.sincronizarEstado()
@@ -498,42 +586,65 @@ func (b *Broker) LidarComMensagem(conn net.Conn) {
 	}
 }
 
+// ============================================================
+// DESPACHO E ELEIÇÃO
+// ============================================================
+
+// tentarDespacharDrone verifica se há ocorrências na fila e se existem drones disponíveis.
+// Se sim, despacha o drone mais adequado para a ocorrência mais urgente.
 func (b *Broker) tentarDespacharDrone() {
 	for {
 		b.mu.Lock()
+		// Apenas o coordenador gerencia o despacho
 		if b.Coordenador != b.ID {
 			b.mu.Unlock()
 			return
 		}
+		// Nada na fila: destrava e sai
 		if b.Estado.FilaEspera.Len() == 0 {
 			b.mu.Unlock()
 			return
 		}
+
+		// Procura um drone disponível
 		var droneEscolhido *protocol.Drone
 		for _, drone := range b.Estado.Drones {
 			if drone.Status == "disponivel" && drone.Bateria > 10 {
+				// Prefere drone com mais bateria
 				if droneEscolhido == nil || drone.Bateria > droneEscolhido.Bateria {
 					droneEscolhido = drone
 				}
 			}
 		}
+
+		// Se não tiver drones disponíveis, mostra no terminal e aborta tentativa
 		if droneEscolhido == nil {
 			fmt.Printf("[Broker %d] Fila com %d item(s), mas nenhum drone disponível no momento.\n",
 				b.ID, b.Estado.FilaEspera.Len())
 			b.mu.Unlock()
 			return
 		}
+
+		// Remove a ocorrência mais urgente da fila
 		ocorrencia := heap.Pop(&b.Estado.FilaEspera).(*protocol.Ocorrencia)
+
+		// Marca o drone como ocupado antes de enviar o comando
 		droneEscolhido.Status = "em_missao"
 		droneEscolhido.MissaoID = ocorrencia.ID
 		b.mu.Unlock()
+
+		// Sincroniza o estado com os outros brokers
 		b.sincronizarEstado()
+
 		fmt.Printf("[Broker %d] ✈ Despachando Drone %s para ocorrência %s (Prioridade %d)\n",
 			b.ID, droneEscolhido.ID, ocorrencia.ID, ocorrencia.Prioridade)
+
+		// Envia o comando ao drone
 		go b.enviarComandoAoDrone(droneEscolhido.Posicao, droneEscolhido.ID, ocorrencia)
 	}
 }
 
+// enviarComandoAoDrone envia a ordem de missão para o endereço TCP do drone e aguarda ACK.
 func (b *Broker) enviarComandoAoDrone(enderecoDrone string, droneID string, ocorrencia *protocol.Ocorrencia) {
 	comando := protocol.ComandoMissao{
 		OcorrenciaID: ocorrencia.ID,
@@ -552,6 +663,7 @@ func (b *Broker) enviarComandoAoDrone(enderecoDrone string, droneID string, ocor
 	if err == nil {
 		defer conn.Close()
 		if err := json.NewEncoder(conn).Encode(msg); err == nil {
+			// Aguarda o ACK do drone antes de considerar a missão aceita
 			conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 			var resposta protocol.Mensagem
 			if err := json.NewDecoder(conn).Decode(&resposta); err == nil {
@@ -566,6 +678,7 @@ func (b *Broker) enviarComandoAoDrone(enderecoDrone string, droneID string, ocor
 	} else {
 		fmt.Printf("[Broker %d] Drone %s REJEITOU ou está OFFLINE! Devolvendo ocorrência %s para a fila.\n",
 			b.ID, droneID, ocorrencia.ID)
+
 		b.mu.Lock()
 		heap.Push(&b.Estado.FilaEspera, ocorrencia)
 		if drone, ok := b.Estado.Drones[droneID]; ok {
@@ -573,22 +686,34 @@ func (b *Broker) enviarComandoAoDrone(enderecoDrone string, droneID string, ocor
 			drone.MissaoID = ""
 		}
 		b.mu.Unlock()
+
+		// Atualiza os outros brokers e tenta despachar de novo
 		b.sincronizarEstado()
 		go b.tentarDespacharDrone()
 	}
 }
 
+// monitorarMissao atua como um cão de guarda (watchdog).
 // Se o drone não responder após 30s, consideramos perdido e reenfileiramos a ocorrência
 func (b *Broker) monitorarMissao(droneID string, ocorrencia *protocol.Ocorrencia) {
+	// Tolerância de 30 segundos para o drone concluir e reportar sucesso
 	time.Sleep(30 * time.Second)
 	b.mu.Lock()
 	drone, existe := b.Estado.Drones[droneID]
+
+	// Se o drone ainda existe e continua atrelado a essa missão, algo deu errado
 	if existe && drone.MissaoID == ocorrencia.ID {
 		fmt.Printf("\n[ALERTA CRÍTICO] Broker %d perdeu sinal do Drone %s no ar!\n", b.ID, droneID)
 		fmt.Printf("[AÇÃO] Removendo drone %s da frota e reenfileirando a ocorrência %s...\n", droneID, ocorrencia.ID)
+
+		// Remove o drone da memória do sistema
 		delete(b.Estado.Drones, droneID)
+
+		// Devolve a missão para a fila
 		heap.Push(&b.Estado.FilaEspera, ocorrencia)
 		b.mu.Unlock()
+
+		// Atualiza o cluster e tenta despachar para outro drone
 		b.sincronizarEstado()
 		go b.tentarDespacharDrone()
 		return
@@ -596,10 +721,11 @@ func (b *Broker) monitorarMissao(droneID string, ocorrencia *protocol.Ocorrencia
 	b.mu.Unlock()
 }
 
-// Implementação do algoritmo do valentão
+// IniciarEleicao executa a lógica do Algoritmo do Valentão (Bully Algorithm)
+// para escolher um novo coordenador caso o atual pare de responder.
 func (b *Broker) IniciarEleicao() {
 	b.mu.Lock()
-	//Verifica se ele está morrendo antes de iniciar uma eleição
+	// Verifica se ele está morrendo antes de iniciar uma eleição
 	if b.Encerrando {
 		b.mu.Unlock()
 		return
@@ -615,6 +741,7 @@ func (b *Broker) IniciarEleicao() {
 		Timestamp: time.Now(),
 	}
 	for idVizinho, endereco := range b.OutrosBrokers {
+		// Envia a eleição para os brokers com ID maior
 		if idVizinho > b.ID {
 			if b.enviarMensagem(endereco, msgEleicao) {
 				temMaior = true
@@ -622,26 +749,38 @@ func (b *Broker) IniciarEleicao() {
 			}
 		}
 	}
+
+	// Nenhum broker maior respondeu: eu sou o coordenador
 	if !temMaior {
 		b.mu.Lock()
 		b.Coordenador = b.ID
 		b.mu.Unlock()
+
 		fmt.Printf("[Broker %d] Sou o novo Coordenador!\n", b.ID)
+
+		// Cria uma mensagem de vitória
 		msgVitoria := protocol.Mensagem{
 			Tipo:      protocol.TipoVitoria,
 			IDOrigem:  b.ID,
 			Timestamp: time.Now(),
 		}
+
+		// Envia a mensagem de vitória aos outros brokers menores
 		for idVizinho, endereco := range b.OutrosBrokers {
 			if idVizinho < b.ID {
 				b.enviarMensagem(endereco, msgVitoria)
 			}
 		}
+		// Inicia processamento de fila acumulada
 		go b.tentarDespacharDrone()
 	}
 }
 
-// Envia uma mensagem para um IP de destino
+// ============================================================
+// COMUNICAÇÃO
+// ============================================================
+
+// enviarMensagem envia uma mensagem para um endereço TCP e não espera confirmação de leitura.
 func (b *Broker) enviarMensagem(ipDestino string, msg protocol.Mensagem) bool {
 	conn, err := net.DialTimeout("tcp", ipDestino, 1*time.Second)
 	if err != nil {
@@ -651,7 +790,7 @@ func (b *Broker) enviarMensagem(ipDestino string, msg protocol.Mensagem) bool {
 	return json.NewEncoder(conn).Encode(msg) == nil
 }
 
-// Envia mensagem e espera ACK de confirmação
+// enviarMensagemComAck envia uma mensagem e espera ativamente um ACK de confirmação na mesma conexão.
 func (b *Broker) enviarMensagemComAck(ipDestino string, msg protocol.Mensagem) bool {
 	conn, err := net.DialTimeout("tcp", ipDestino, 2*time.Second)
 	if err != nil {
@@ -661,6 +800,7 @@ func (b *Broker) enviarMensagemComAck(ipDestino string, msg protocol.Mensagem) b
 	if err := json.NewEncoder(conn).Encode(msg); err != nil {
 		return false
 	}
+	// Aguarda o ACK com timeout
 	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	var resposta protocol.Mensagem
 	if err := json.NewDecoder(conn).Decode(&resposta); err != nil || resposta.Tipo != protocol.TipoACK {

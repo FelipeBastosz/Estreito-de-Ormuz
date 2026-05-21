@@ -2,8 +2,7 @@ package state
 
 import "Desbloqueio-do-Estreito-de-Ormuz/Protocol"
 
-// FilaPrioridade é simplesmente um Array (Slice) de ponteiros para Ocorrencias.
-// Usamos ponteiros (*protocol.Ocorrencia) para economizar memória, trafegando apenas o endereço de memória, não copiando o objeto inteiro.
+// FilaPrioridade é um Array de ponteiros para ocorrêcias.
 type FilaPrioridade []*protocol.Ocorrencia
 
 // Len ensina ao Heap como saber o tamanho da fila.
