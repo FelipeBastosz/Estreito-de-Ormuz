@@ -75,29 +75,32 @@ Estreito-de-Ormuz
 ├── Broker/          # Lógica do broker por setor
 │   └── broker.go
 │
+├── Client/          # Cliente interativo TCP
+│   └── client.go
+│
 ├── Drone/           # Atuadores vinculados a cada setor
 │   └── drone.go
+│
+├── Protocol/        # Definições de protocolo compartilhadas
+│   └── protocol.go
 │
 ├── Sensor/          # Simuladores de telemetria por setor
 │   └── sensor.go
 │
-├── Client/          # Cliente interativo TCP
-│   └── client.go
-│
-├── Protocol/        # Definições de protocolo compartilhadas
-│
 ├── State/           # Persistência e recuperação de estado
+│   └── persistence.go
+│   └── priorityQueue.go
 │
+├── config.json      # Mapa de broker ID → endereço
+├── docker-compose.yml
 ├── Dockerfile.broker
+├── Dockerfile.client
 ├── Dockerfile.drone
 ├── Dockerfile.sensor
-├── Dockerfile.client
-├── docker-compose.yml
-├── config.json      # Mapa de broker ID → endereço
-├── Makefile
 ├── go.mod
-├── README.md
 └── LICENSE
+├── Makefile
+├── README.md
 ```
 
 ---
@@ -108,10 +111,10 @@ O arquivo `config.json` mapeia o ID de cada setor ao endereço TCP do seu broker
 
 ```json
 {
-  "1": "broker1:9081",
-  "2": "broker2:9082",
-  "3": "broker3:9083",
-  "4": "broker4:9084"
+   "1": "broker1:9081",
+   "2": "broker2:9082",
+   "3": "broker3:9083",
+   "4": "broker4:9084"
 }
 ```
 
