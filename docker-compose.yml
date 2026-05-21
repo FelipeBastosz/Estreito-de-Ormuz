@@ -130,7 +130,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.drone
-    command: ["drone3", "drone3:9092", "broker3:9082"]
+    command: ["drone3", "drone3:9093", "broker3:9083"]
     environment:
       CONFIG_PATH: /app/config.json
     volumes:
