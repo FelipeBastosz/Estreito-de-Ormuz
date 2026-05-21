@@ -490,7 +490,7 @@ func (b *Broker) LidarComMensagem(conn net.Conn) {
 				ocorrencia.Timestamp = time.Now()
 			}
 			b.mu.Lock()
-			heap.Push(&b.Estado.FilaEspera, &ocorrencia)
+			heap.Push(&b.Estado.FilaEspera, &ocorrencia) //Coloca a requisição na Fila de Requisições
 			b.mu.Unlock()
 			b.sincronizarEstado()
 			ack := protocol.Mensagem{Tipo: protocol.TipoACK, IDOrigem: b.ID}
@@ -532,54 +532,80 @@ func (b *Broker) LidarComMensagem(conn net.Conn) {
 		euSouCoord := b.Coordenador == b.ID
 		b.mu.Unlock()
 		if euSouCoord {
+			// Se eu sou o Líder: processo o registro do novo drone e salvo no estado global, sincronizando os outros servidores
 			var droneInfo protocol.Drone
 			json.Unmarshal([]byte(msg.Payload), &droneInfo)
+
+			// Adiciona ou atualiza o drone no mapa da frota
 			b.mu.Lock()
 			b.Estado.Drones[droneInfo.ID] = &droneInfo
 			b.mu.Unlock()
+
+			// Espelha a nova frota de drones para os demais brokers
 			b.sincronizarEstado()
 			fmt.Printf("[Broker %d] Drone %s registrado (Status: %s, Bateria: %d%%)\n",
 				b.ID, droneInfo.ID, droneInfo.Status, droneInfo.Bateria)
+
+			// Como um novo drone acabou de entrar na rede, tenta despachá-lo imediatamente
+			// caso existam ocorrências pendentes aguardando na fila de requisições
 			go b.tentarDespacharDrone()
 		} else {
+			// Se NÃO sou o Líder: repasso a mensagem para o Coordenador
 			b.mu.Lock()
 			temCoord := b.Coordenador != -1
 			coord := b.Coordenador
 			b.mu.Unlock()
 			if temCoord {
+				// Tenta encaminhar. Se o enviarMensagem retornar false, o TCP falhou (Timeout/Crash).
+				// Isso atua como um mecanismo de detecção de falha do Líder.
 				if !b.enviarMensagem(b.OutrosBrokers[coord], msg) {
 					fmt.Printf("[Broker %d] O Broker Coordenador %d parou de responder, iniciar nova eleição!\n", b.ID, coord)
+					//Se o coordenador falhou, inicio uma eleição para eleger um novo coordenador
 					go b.IniciarEleicao()
 				}
 			}
 		}
 	case protocol.TipoStatusDrone:
+		//Verifica se o broker atual é o coordenador
 		b.mu.Lock()
 		euSouCoord := b.Coordenador == b.ID
 		b.mu.Unlock()
+
 		if euSouCoord {
+			// Se eu sou o Líder: recebo o report de fim de missão ou bateria e atualizo o drone
 			var droneInfo protocol.Drone
 			json.Unmarshal([]byte(msg.Payload), &droneInfo)
 			b.mu.Lock()
+
+			// Apenas atualiza se o drone já estiver registrado na memória
 			if drone, existe := b.Estado.Drones[droneInfo.ID]; existe {
 				drone.Status = droneInfo.Status
 				drone.Bateria = droneInfo.Bateria
 				drone.MissaoID = "" // Libera da missão anterior
 			}
 			b.mu.Unlock()
+
+			// Propaga a mudança de status (ex: de "em_missao" para "disponivel") para o cluster
 			b.sincronizarEstado()
+
 			fmt.Printf("[Broker %d] Drone %s retornou. Status: %s | Bateria: %d%%\n",
 				b.ID, droneInfo.ID, droneInfo.Status, droneInfo.Bateria)
+
+			// Como o drone acabou de ficar livre, aciona a rotina para
+			// verificar se a fila tem novas demandas para ele.
 			go b.tentarDespacharDrone()
 		} else {
+			// Se não sou o Líder: repasso o status atualizado do drone local para o Coordenador validar
 			b.mu.Lock()
 			temCoord := b.Coordenador != -1
 			coord := b.Coordenador
 			b.mu.Unlock()
+
 			if temCoord {
+				// Se o envio para o coordenador falhar, assume que ele morreu
 				if !b.enviarMensagem(b.OutrosBrokers[coord], msg) {
 					fmt.Printf("[Broker %d] O Broker Coordenador %d parou de responder, iniciar nova eleição!\n", b.ID, coord)
-					go b.IniciarEleicao()
+					go b.IniciarEleicao() // Liderança falhou, convoca eleição
 				}
 			}
 		}

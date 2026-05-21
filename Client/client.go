@@ -73,7 +73,10 @@ func main() {
 }
 
 func enviarOcorrencia(ipDestino string, ocorrencia protocol.Ocorrencia) {
+	// Transforma a ocorrência em JSON
 	payload, _ := json.Marshal(ocorrencia)
+
+	// Cria a mensagem de tipo ocorrência para enviar ao Broker
 	msg := protocol.Mensagem{
 		Tipo:      protocol.TipoOcorrencia,
 		IDOrigem:  0,
@@ -81,6 +84,7 @@ func enviarOcorrencia(ipDestino string, ocorrencia protocol.Ocorrencia) {
 		Payload:   string(payload),
 	}
 
+	//Tenta iniciar uma conexão com o broker e estabelece um tempo limite de 2 segundos para resposta
 	conn, err := net.DialTimeout("tcp", ipDestino, 2*time.Second)
 	if err != nil {
 		fmt.Printf("❌ Falha na conexão com %s: %v\n", ipDestino, err)
@@ -88,17 +92,22 @@ func enviarOcorrencia(ipDestino string, ocorrencia protocol.Ocorrencia) {
 	}
 	defer conn.Close()
 
+	// Envia a requisição para o Broker
 	json.NewEncoder(conn).Encode(msg)
 
+	// Aguarda a confirmação do Broker
 	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	var resposta protocol.Mensagem
+	// Se o Broker respondeu, dizemos que a mensagem chegou nele
 	if err := json.NewDecoder(conn).Decode(&resposta); err == nil && resposta.Tipo == protocol.TipoACK {
 		fmt.Printf("✅ Confirmado: Ocorrência %s aceita pelo líder!\n", ocorrencia.ID)
 	} else {
+		// Se der timeout na resposta, avisa o usuário, mas não dá crash.
 		fmt.Printf("⚠️  Mensagem enviada, aguardando processamento...\n")
 	}
 }
 
+// menu imprime o menu no terminal
 func menu() {
 	fmt.Println("==================================================")
 	fmt.Println("   Terminal de Comando - Estreito de Ormuz        ")
