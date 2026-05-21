@@ -13,19 +13,20 @@ import (
 	"time"
 )
 
-// Drone representa um drone físico monitoramento.
+// Drone representa um drone físico de monitoramento.
 // Escuta comandos TCP, executa missões simuladas e reporta conclusão ao broker.
 type Drone struct {
-	ID             string
-	Endereco       string // Endereço TCP onde este drone escuta (ex: "drone1:9091")
-	EnderecoBroker string // Broker local para registro e reports
-	Status         string // "disponivel", "em_missao", "recarregando"
-	Bateria        int
-	mu             sync.Mutex
-	Brokers        []string // lista de brokers para responder
+	ID             string     // Identificador único do drone (ex: "drone1")
+	Endereco       string     // Endereço TCP onde este drone recebe comandos (ex: "0.0.0.0:9091")
+	EnderecoBroker string     // Endereço do broker do seu setor atual (usado para reportes)
+	Status         string     // Estado atual: "disponivel", "em_missao", "recarregando"
+	Bateria        int        // Nível de bateria atual (0 a 100%)
+	mu             sync.Mutex // Exclusão mútua para evitar race conditions
+	Brokers        []string   // Lista de fallback com o endereço de todos os brokers conhecidos
 }
 
 func main() {
+	// Valida os argumentos passados via linha de comando ou docker-compose
 	if len(os.Args) < 4 {
 		fmt.Println("Uso: drone [ID] [ENDERECO_PROPRIO] [ENDERECO_BROKER]")
 		fmt.Println("Exemplo: drone drone1 0.0.0.0:9091 broker1:9081")
@@ -36,6 +37,7 @@ func main() {
 	enderecoProprio := os.Args[2]
 	enderecoBroker := os.Args[3]
 
+	// Instancia o estado inicial do Drone
 	drone := &Drone{
 		ID:             droneID,
 		Endereco:       enderecoProprio,
@@ -58,12 +60,12 @@ func main() {
 	// Começa a ouvir comandos em paralelo
 	go drone.escutar()
 
-	// Aguarda o sistema subir antes de se registrar
+	// Aguarda o sistema subir antes de se registrar no Broker
 	time.Sleep(3 * time.Second)
 	drone.registrarNoBroker()
 
 	// Re-registra periodicamente para o caso de o coordenador ter mudado
-	// (nova eleição após falha de um broker)
+	// Ex: nova eleição após falha de um broker
 	go drone.reregistroPeriodico()
 
 	select {} // Mantém o processo vivo
@@ -74,7 +76,7 @@ func main() {
 // ============================================================
 
 func (d *Drone) escutar() {
-	// 1. Extrai APENAS a porta do endereço que veio do docker-compose
+	// Extrai apenas a porta do endereço que veio do docker-compose
 	// Exemplo: de "192.168.15.13:9091", ele pega só o "9091"
 	_, porta, err := net.SplitHostPort(d.Endereco)
 	if err != nil {
@@ -82,7 +84,7 @@ func (d *Drone) escutar() {
 		os.Exit(1)
 	}
 
-	// 2. Força o servidor TCP a escutar internamente em 0.0.0.0 (Obrigatório para Docker)
+	// Força o servidor TCP a escutar internamente em 0.0.0.0 para receber mensagens de qualquer IP
 	ln, err := net.Listen("tcp", "0.0.0.0:"+porta)
 	if err != nil {
 		fmt.Printf("[Drone %s] Erro ao abrir porta %s: %v\n", d.ID, porta, err)
@@ -90,15 +92,18 @@ func (d *Drone) escutar() {
 	}
 	fmt.Printf("[Drone %s] Pronto em 0.0.0.0:%s (Registrado externamente como %s)\n", d.ID, porta, d.Endereco)
 
+	// É onde recebe e aceita as conexões
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
 			continue
 		}
+		// É quem faz o processamento da mensagem recebida
 		go d.processarComando(conn)
 	}
 }
 
+// processarComando traduz a requisição TCP recebida do Coordenador.
 func (d *Drone) processarComando(conn net.Conn) {
 	defer conn.Close()
 
@@ -108,10 +113,10 @@ func (d *Drone) processarComando(conn net.Conn) {
 	}
 
 	switch msg.Tipo {
-
+	// O Coordenador enviou uma missão diretamente para este drone
 	case protocol.TipoComandoDrone:
 		// Garantia de exclusão mútua: não aceita missão se já estiver ocupado.
-		// Isso satisfaz o requisito de "nunca despachar o mesmo drone duas vezes".
+		// Garantindo nunca despachar o mesmo drone duas vezes;
 		d.mu.Lock()
 		if d.Status != "disponivel" {
 			fmt.Printf("[Drone %s] Recusei missão — já estou em %s\n", d.ID, d.Status)
@@ -123,6 +128,7 @@ func (d *Drone) processarComando(conn net.Conn) {
 		d.Status = "em_missao"
 		d.mu.Unlock()
 
+		// Responde com um ACK imediatamente para o Coordenador confirmar o despacho
 		ack := protocol.Mensagem{
 			Tipo:      protocol.TipoACK,
 			IDOrigem:  msg.IDOrigem,
@@ -143,8 +149,8 @@ func (d *Drone) processarComando(conn net.Conn) {
 		// Executa em goroutine para liberar o handler imediatamente
 		go d.executarMissao(comando)
 
+	// Coordenador pedindo re-registro (após nova eleição)
 	case protocol.TipoRegistroDrone:
-		// Coordenador pedindo re-registro (após nova eleição)
 		d.registrarNoBroker()
 	}
 }
@@ -157,16 +163,18 @@ func (d *Drone) processarComando(conn net.Conn) {
 // Ao terminar, reporta status ao broker para liberar a fila.
 func (d *Drone) executarMissao(comando protocol.ComandoMissao) {
 	// Tempo de missão varia com a prioridade (missões críticas recebem atenção mais longa)
-	baseSegundos := map[int]int{1: 5, 2: 8, 3: 12}
+	baseSegundos := map[int]int{1: 5, 2: 8, 3: 12} // 5s para prioridade 1, 8s para prioridade 2 e 12s para prioridade 3
 	base := baseSegundos[comando.Prioridade]
 	if base == 0 {
 		base = 7
 	}
+	// Cria um tempo aleatório
 	duracaoMissao := time.Duration(base+rand.Intn(8)) * time.Second
 
 	fmt.Printf("[Drone %s] Voando para %s. Duração estimada: %v\n",
 		d.ID, comando.OcorrenciaID, duracaoMissao)
 
+	// Simula o tempo de voo
 	time.Sleep(duracaoMissao)
 
 	// Consome bateria proporcionalmente ao tempo de missão
@@ -182,16 +190,17 @@ func (d *Drone) executarMissao(comando protocol.ComandoMissao) {
 	fmt.Printf("[Drone %s] Missão %s concluída! Bateria restante: %d%%\n",
 		d.ID, comando.OcorrenciaID, batAtual)
 
-	// Bateria crítica: drone precisa recarregar antes de aceitar nova missão
+	// Se a bateria ficar crítica (< 20%), o drone força uma recarga antes de aceitar novos trabalhos
 	if batAtual < 20 {
 		d.recarregar()
 	} else {
+		// Se estiver com bateria ok, fica disponível novamente
 		d.mu.Lock()
 		d.Status = "disponivel"
 		d.mu.Unlock()
 	}
 
-	// Reporta ao broker que está livre
+	// Avisa a rede que terminou o trabalho ou que entrou em modo de recarga
 	d.reportarStatus()
 }
 
@@ -225,7 +234,7 @@ func (d *Drone) recarregar() {
 // ============================================================
 
 // registrarNoBroker anuncia o drone ao broker local.
-// O broker (ou o coordenador, se for diferente) inclui o drone no pool gerenciado.
+// O broker (ou o coordenador) inclui o drone na frota de drones.
 func (d *Drone) registrarNoBroker() {
 	d.mu.Lock()
 	info := protocol.Drone{
@@ -239,7 +248,7 @@ func (d *Drone) registrarNoBroker() {
 	payload, _ := json.Marshal(info)
 	msg := protocol.Mensagem{
 		Tipo:      protocol.TipoRegistroDrone,
-		IDOrigem:  0,
+		IDOrigem:  0, // Sensores e Drones não têm ID de Broker
 		Timestamp: time.Now(),
 		Payload:   string(payload),
 	}
@@ -273,7 +282,7 @@ func (d *Drone) reportarStatus() {
 }
 
 // reregistroPeriodico garante que o drone se reapresente após mudanças de coordenador.
-// A cada 30 segundos, re-envia o registro — se o coordenador mudou, ele recebe e atualiza o pool.
+// A cada 30 segundos, reenvia o registro, se o coordenador mudou, ele recebe e atualiza a frota.
 func (d *Drone) reregistroPeriodico() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -289,19 +298,22 @@ func (d *Drone) reregistroPeriodico() {
 	}
 }
 
-// Tenta enviar ao broker principal. Se falhar, tenta outros brokers conhecidos.
+// enviarParaBroker implementa resiliência de rede.
+// Tenta enviar para o broker principal. Se ele estiver offline,
+// percorre a lista de brokers conhecidos até achar um vivo.
 func (d *Drone) enviarParaBroker(msg protocol.Mensagem) bool {
-	// 1) tenta broker principal
+	// Tenta broker principal
 	if d.tentarEnvio(d.EnderecoBroker, msg) {
 		return true
 	}
 
-	// 2) tenta brokers fallback
+	// Tenta os outros brokers disponíveis
 	for _, addr := range d.Brokers {
 		if addr == d.EnderecoBroker {
-			continue
+			continue // Pula o que já falhou
 		}
 		if d.tentarEnvio(addr, msg) {
+			// Atualiza o broker primário para o que respondeu
 			d.EnderecoBroker = addr
 			return true
 		}
@@ -309,7 +321,7 @@ func (d *Drone) enviarParaBroker(msg protocol.Mensagem) bool {
 	return false
 }
 
-// Vai tentar enviar uma mensagem ao broker, caso ele não consiga, aponta erro.
+// tentarEnvio vai tentar uma conexão TCP com timeout para não travar o atuador. Caso ele não consiga, aponta erro.
 func (d *Drone) tentarEnvio(addr string, msg protocol.Mensagem) bool {
 	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
 	if err != nil {
@@ -320,7 +332,8 @@ func (d *Drone) tentarEnvio(addr string, msg protocol.Mensagem) bool {
 	return json.NewEncoder(conn).Encode(msg) == nil
 }
 
-// Lê brokers do config.json para recuperação, caso o broker que estamos conectados caia
+// carregarBrokers lê o config.json para que o drone
+// saiba para quem tentar contato caso o seu broker de setor caia
 func carregarBrokers(caminho string) ([]string, error) {
 	arquivo, err := os.ReadFile(caminho)
 	if err != nil {

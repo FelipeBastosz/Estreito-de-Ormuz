@@ -12,7 +12,14 @@ import (
 	"time"
 )
 
+// ============================================================
+// CLIENTE TCP
+// ============================================================
+// Este programa funciona como a interface humana do sistema.
+// Permite que um usuário injete ocorrências manualmente em qualquer
+// broker da rede, simulando detecções que não vieram dos sensores automatizados.
 func main() {
+	// Valida se o usuário passou o endereço do broker ao iniciar o programa
 	if len(os.Args) < 2 {
 		fmt.Println("Uso: client [ENDERECO_BROKER]")
 		fmt.Println("Exemplo: client 192.168.1.50:9081")
@@ -26,12 +33,14 @@ func main() {
 	fmt.Printf("Conectado ao Broker: %s\n\n", enderecoBroker)
 
 	contador := 1
+	// Mantém o terminal aberto aguardando comandos do usuário
 	for {
 		menu()
 		fmt.Print("Digite a descrição da Ocorrência (ou 'sair'): ")
 		descricao, _ := reader.ReadString('\n')
 		descricao = strings.TrimSpace(descricao)
 
+		// Condição de saída do terminal
 		if strings.ToLower(descricao) == "sair" {
 			break
 		}
@@ -39,19 +48,24 @@ func main() {
 		fmt.Print("Insira a prioridade da requisição (1-Aviso, 2-Alerta, 3-Crítico): ")
 		prioStr, _ := reader.ReadString('\n')
 		prioridade, err := strconv.Atoi(strings.TrimSpace(prioStr))
+
+		// Validação do input para não enviar lixo para a Fila de Prioridade
 		if err != nil || prioridade < 1 || prioridade > 3 {
 			fmt.Println("❌ Prioridade inválida. Use 1, 2 ou 3.\n")
 			continue
 		}
 
+		// Constrói a Ocorrencia usando a estrutura padronizada
 		ocorrencia := protocol.Ocorrencia{
+			// Gera um ID único e rastreável. Ex: "USER-meupc-OC0001"
 			ID:         fmt.Sprintf("USER-%s-OC%04d", os.Getenv("HOSTNAME"), contador),
 			Prioridade: prioridade,
 			Timestamp:  time.Now(),
 			Descricao:  descricao,
-			Setor:      "manual-input",
+			Setor:      "manual-input", // Identifica que foi injetado por um humano, não por um setor fixo
 		}
 
+		// Envia a requisição para o broker
 		enviarOcorrencia(enderecoBroker, ocorrencia)
 		contador++
 		fmt.Println()
