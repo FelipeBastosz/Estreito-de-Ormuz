@@ -77,18 +77,17 @@ Para ilustrar o funcionamento dinâmico da concorrência, recuperação de falha
 ### 1. Inicialização do Sistema (Cold Start) e Eleição de Líder
 Quando os containers sobem, nenhum broker reconhece um líder ativo. A ausência de sincronização dispara o Algoritmo do Valentão (*Bully Algorithm*) simultaneamente.
 
-![Diagrama de Eleição de Líder](<img width="774" height="1349" alt="image" src="https://github.com/user-attachments/assets/0a1825d3-001b-4249-abde-8e1f126667ab" />)
+![Diagrama de Eleição de Líder](Docs/diagrama_eleicao.png)
 
 ### 2. Fluxo de Despacho e Atendimento de Ocorrência
 O diagrama abaixo ilustra o processamento de uma ocorrência `Crítica`. O Coordenador recebe o alerta, processa na Fila de Prioridade utilizando `Mutex` para garantir exclusão mútua distribuída, e despacha a missão via conexão TCP direta ao atuador.
 
-![Fluxo de Despacho de Ocorrência](<img width="729" height="922" alt="image" src="https://github.com/user-attachments/assets/3fcab712-490b-4be8-8aaf-795e2771bd0a" />)
+![Fluxo de Despacho de Ocorrência](Docs/diagrama_fluxo_ocorrencia.png)
 
 ### 3. Manutenção e Encerramento (Graceful Handoff)
 Para evitar problemas durante desligamentos programados (como um `docker stop`), o líder implementa um mecanismo de desligamento. Ele escolhe o próximo sucessor vivo e repassa a coordenação instantaneamente.
 
-![Fluxo de Transferência Limpa (Handoff)](<img width="664" height="717" alt="image" src="https://github.com/user-attachments/assets/bfa08f62-208c-4ef0-b86b-fdeb67fe9a69" />
-)
+![Fluxo de Transferência Limpa (Handoff)](Docs/diagrama_handoff.png)
 
 
 ---
@@ -229,7 +228,7 @@ docker-compose run -d --rm --no-deps drone1 ./drone <NOME> <DRONE_ADDR> broker2:
 docker stop <nome_do_container_broker>
 ```
 
-O drone e os sensores do setor tentarão reconexão. Ao reiniciar o broker, o estado é recuperado do volume:
+O drone e os sensores do setor tentarão reconexão. Ao reiniciar o broker, o estado é recuperado:
 
 ```bash
 docker restart <nome_do_container_broker>
@@ -269,7 +268,7 @@ Exemplo:
 make client IP=172.16.201.9
 ```
 
-> **Atenção:** Antes de rodar nos computadores remotos, atualize os endereços dos brokers no `config.json` para os IPs físicos reais das máquinas.
+> **Atenção:** Antes de rodar nos computadores remotos, atualize os endereços dos brokers no `config.json` para os IPs físicos reais das máquinas e no `docker-compose` também.
 
 ### Limpeza total (volumes incluídos):
 
@@ -330,7 +329,7 @@ Insira a prioridade da requisição (1-Aviso, 2-Alerta, 3-Crítico): 3
 | ------------ | ------------------------------------------------------------- | ------------------------------ |
 | `ID`         | Identificador único gerado automaticamente pelo cliente       | `USER-client-01-OC0001`        |
 | `Descricao`  | Texto livre descrevendo o incidente reportado                 | `Embarcação suspeita no canal` |
-| `Prioridade` | Nível de urgência: `1`-Aviso, `2`-Alerta, `3`-Crítico        | `3`                            |
+| `Prioridade` | Nível de urgência: `1`-Aviso, `2`-Alerta, `3`-Crítico         | `3`                            |
 | `Setor`      | Definido como `manual-input` para entradas do operador        | `manual-input`                 |
 | `Timestamp`  | Momento exato do envio, preenchido automaticamente            | `2025-07-10T14:32:01Z`         |
 
@@ -354,20 +353,7 @@ Digite a descrição da Ocorrência (ou 'sair'): sair
 
 ---
 
-## 💾 Persistência de Estado
 
-Cada broker possui um volume Docker dedicado para persistir seu estado local:
-
-| Volume         | Broker   | Setor   |
-| -------------- | -------- | ------- |
-| `state-broker1`| broker1  | Setor 1 |
-| `state-broker2`| broker2  | Setor 2 |
-| `state-broker3`| broker3  | Setor 3 |
-| `state-broker4`| broker4  | Setor 4 |
-
-Em caso de queda e reinício do container, o broker relê o arquivo de estado e restaura automaticamente o registro de drones e sensores, sem necessidade de reconexão manual dos dispositivos.
-
----
 
 ## 📚 Referências e Links Úteis
 
