@@ -33,10 +33,10 @@ O sistema simula um **ambiente de vigilância distribuída**, onde sensores cole
 
 ## 🚀 Principais Funcionalidades (Features)
 
-* **Federação de Brokers:** 4 brokers independentes, um por setor geográfico, cada um escutando em sua própria porta (9081–9084). O roteamento entre setores é resolvido via `config.json`, permitindo que o cliente se conecte a qualquer broker da rede.
-* **Eleição de Líder (Bully Algorithm):** Os brokers executam o **Algoritmo Bully** para eleger um coordenador entre os nós ativos. Quando o líder atual cai ou se torna inalcançável, uma nova eleição é disparada automaticamente — o broker com o maior ID que responder ao desafio assume a coordenação do cluster.
+* **Distribuição de Brokers:** 4 brokers independentes, um por setor geográfico, cada um escutando em sua própria porta (9081–9084). O roteamento entre setores é resolvido via `config.json`, permitindo que o cliente se conecte a qualquer broker da rede.
+* **Eleição de Líder (Bully Algorithm):** Os brokers executam o **Algoritmo Bully** para eleger um coordenador entre os nós ativos. Quando o líder atual cai ou se torna inalcançável, uma nova eleição é disparada automaticamente — o broker com o maior ID que responder ao desafio assume a coordenação do sistema.
 * **Fila de Prioridade (Max-Heap):** As ocorrências recebidas pelo broker líder são enfileiradas em uma **heap de prioridade máxima**. Isso garante que incidentes `Crítico` (prioridade 3) sejam sempre despachados aos drones antes de `Alertas` (2) ou `Avisos` (1), independentemente da ordem de chegada.
-* **Persistência de Estado:** Cada broker grava seu estado em um **volume Docker dedicado**. Se um container cair e subir novamente, o estado é recuperado automaticamente — sensores, drones e últimas leituras são restaurados sem intervenção manual.
+* **Persistência de Estado:** Os brokers compartilham os estados entre si, sendo todos sincronizados ao estado atual do coordenador. Então, se um container cair e subir novamente, o estado é recuperado automaticamente — sensores, drones e últimas leituras são restaurados sem intervenção manual.
 * **Frota de Drones (Atuadores):** Cada drone se registra com um nome, endereço próprio e o endereço do broker ao qual pertence, permitindo rastreamento e controle individualizados por setor.
 * **Sensores por Setor:** Cada setor conta com 2 sensores independentes, com intervalos de envio configuráveis via variáveis de ambiente (`SENSOR_INTERVALO_MIN` / `SENSOR_INTERVALO_MAX`).
 * **Protocolo Compartilhado:** Pacote `Protocol` centraliza as definições de mensagem usadas por todos os componentes, garantindo consistência e facilitando extensões futuras.
@@ -50,23 +50,48 @@ Todos os componentes se comunicam via **TCP**, usando mensagens encapsuladas em 
 
 * **Sensores:** Registram-se no broker passando `[ID]`, `[setor]` e `[endereço_do_broker]` como argumentos. Enviam leituras periódicas de telemetria.
 * **Drones:** Registram-se com `[nome]`, `[endereço_próprio]` e `[endereço_do_broker]`. Aguardam comandos de missão e respondem com confirmação de execução.
-* **Clientes:** Conectam-se a um broker específico informando o IP:porta. A partir daí, usam comandos textuais para listar, monitorar e acionar os dispositivos de qualquer setor.
+* **Clientes:** Conectam-se a um broker específico informando o IP:porta. A partir daí, usam comandos textuais para gerar requisições manualmente.
 
 ---
 
 ## 🏗️ Arquitetura do Sistema
 
+<img width="1011" height="571" alt="image" src="https://github.com/user-attachments/assets/63b6e469-a03a-4823-9a9f-3e38d99010ff" />
+OBS: Todas as comunicações representadas trafegam uma estrutura padronizada (`protocol.Mensagem`), garantindo coesão e facilidade de parsing.
+
 O sistema é dividido em 6 componentes principais:
 
 1. **Broker (×4):** Um broker por setor, cada um responsável pelos dispositivos do seu setor. Escuta na porta `908X` (TCP).
-2. **Drone (×4):** Atuador vinculado a um broker. Recebe comandos e reporta seu estado de volta ao broker.
+2. **Drone (×4):** Atuador vinculado a um broker. Recebe comandos diretos do líder e reporta seu estado de volta ao broker.
 3. **Sensor (×8):** Dois sensores por setor, enviando telemetria periódica ao seu broker local.
-4. **Client:** Interface interativa TCP que permite ao operador se conectar a qualquer broker e operar toda a frota.
+4. **Client:** Interface interativa TCP que permite ao operador se conectar a qualquer broker e gerar requisições.
 5. **Protocol:** Pacote compartilhado com as definições de mensagem e protocolo de comunicação.
-6. **State:** Pacote compartilhado responsável pela leitura, escrita e recuperação do estado persistido em disco.
+6. **State:** Gerencia a Fila de Prioridades e a persistência dos Estados.
 
 ---
 
+## 🔄 Modelagem e Fluxos do Sistema
+
+Para ilustrar o funcionamento dinâmico da concorrência, recuperação de falhas e despacho de drones, os diagramas de sequência abaixo detalham o comportamento do sistema distribuído.
+
+### 1. Inicialização do Sistema (Cold Start) e Eleição de Líder
+Quando os containers sobem, nenhum broker reconhece um líder ativo. A ausência de sincronização dispara o Algoritmo do Valentão (*Bully Algorithm*) simultaneamente.
+
+![Diagrama de Eleição de Líder](<img width="774" height="1349" alt="image" src="https://github.com/user-attachments/assets/0a1825d3-001b-4249-abde-8e1f126667ab" />)
+
+### 2. Fluxo de Despacho e Atendimento de Ocorrência
+O diagrama abaixo ilustra o processamento de uma ocorrência `Crítica`. O Coordenador recebe o alerta, processa na Fila de Prioridade utilizando `Mutex` para garantir exclusão mútua distribuída, e despacha a missão via conexão TCP direta ao atuador.
+
+![Fluxo de Despacho de Ocorrência](<img width="729" height="922" alt="image" src="https://github.com/user-attachments/assets/3fcab712-490b-4be8-8aaf-795e2771bd0a" />)
+
+### 3. Manutenção e Encerramento (Graceful Handoff)
+Para evitar problemas durante desligamentos programados (como um `docker stop`), o líder implementa um mecanismo de desligamento. Ele escolhe o próximo sucessor vivo e repassa a coordenação instantaneamente.
+
+![Fluxo de Transferência Limpa (Handoff)](<img width="664" height="717" alt="image" src="https://github.com/user-attachments/assets/bfa08f62-208c-4ef0-b86b-fdeb67fe9a69" />
+)
+
+
+---
 ## 📂 Estrutura do Projeto
 
 ```
@@ -87,7 +112,7 @@ Estreito-de-Ormuz
 ├── Sensor/          # Simuladores de telemetria por setor
 │   └── sensor.go
 │
-├── State/           # Persistência e recuperação de estado
+├── State/           # Gerenciamento da fila de prioridades e dos Estados
 │   └── persistence.go
 │   └── priorityQueue.go
 │
