@@ -94,6 +94,10 @@ Para garantir que os recursos do sistema sejam alocados de forma inteligente, as
 1. **Criticidade (Nível 3 > 2 > 1):** Incidentes graves furam a fila instantaneamente.
 2. **Tempo (Desempate):** Em caso de mesma criticidade, a ocorrência registrada primeiro tem precedência.
 
+![Lógica da Função Less](Docs/diagrama_heap_fluxo.png)
+
+O fluxograma acima detalha o motor de comparação (implementado na função `Less` do Go) utilizado internamente pelo algoritmo para avaliar duas ocorrências. À medida que essas regras são aplicadas a cada novo alerta recebido, o sistema organiza os dados na memória de forma hierárquica. Isso garante que o Coordenador sempre tenha acesso imediato à missão mais crítica diretamente no topo da estrutura, conforme ilustrado na visão em árvore a seguir:
+
 ![Estrutura da Árvore](Docs/diagrama_heap_arvore.png)
 
 ### 5. Manutenção e Encerramento (Graceful Handoff)
